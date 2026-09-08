@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "scope": "TODO classification validation and role binding; not semantic planner accuracy or live model evidence",
+  "defaults": {
+    "kind": "simple",
+    "signals": ["extraction"],
+    "clarity": "clear",
+    "usefulness": "required",
+    "supported": true,
+    "required_inputs_present": true,
+    "certified_deterministic": false,
+    "privacy_allows_candidate": true,
+    "capable_model_available": true
+  },
+  "cases": [
+    {"id":"R01","description":"Large exact CSV aggregation","input":{"kind":"mechanical","certified_deterministic":true,"signals":["fixed_transform"]},"expected":{"action":"execute","role":"D"}},
+    {"id":"R02","description":"Unchanged file monitor","input":{"kind":"mechanical","certified_deterministic":true},"expected":{"action":"execute","role":"D"}},
+    {"id":"R03","description":"Extract meeting action owners","input":{},"expected":{"action":"execute","role":"L"}},
+    {"id":"R04","description":"Short single-source summary","input":{"signals":["summarization"]},"expected":{"action":"execute","role":"L"}},
+    {"id":"R05","description":"Compose report from verified tables","input":{"kind":"standard","signals":["synthesis"]},"expected":{"action":"execute","role":"M"}},
+    {"id":"R06","description":"Short but conflicting source interpretation","input":{"kind":"complex","signals":["conflicting_sources"]},"expected":{"action":"execute","role":"H"}},
+    {"id":"R07","description":"Underclassified causal judgment corrected","input":{"kind":"simple","signals":["causal_judgment"]},"expected":{"action":"execute","role":"H"}},
+    {"id":"R08","description":"Missing recipient is missing input","input":{"required_inputs_present":false,"kind":"complex"},"expected":{"action":"awaiting_input","role":null}},
+    {"id":"R09","description":"Explicit missing input remains blocked","input":{"clarity":"missing_input"},"expected":{"action":"awaiting_input","role":null}},
+    {"id":"R10","description":"Uncertain interpretation with sufficient evidence","input":{"clarity":"uncertain"},"expected":{"action":"execute","role":"M"}},
+    {"id":"R11","description":"Saving important report is still mechanical","input":{"kind":"mechanical","certified_deterministic":true,"signals":["fixed_transform"]},"expected":{"action":"execute","role":"D"}},
+    {"id":"R12","description":"Optional decorative slide is not added automatically","input":{"usefulness":"optional","kind":"standard"},"expected":{"action":"skip_optional","role":null}},
+    {"id":"R13","description":"No privacy-permitted model","input":{"privacy_allows_candidate":false},"expected":{"action":"POLICY_DENIED","role":null}},
+    {"id":"R14","description":"Unsupported Excel recalculation","input":{"supported":false,"certified_deterministic":true,"kind":"mechanical"},"expected":{"action":"UNSUPPORTED_CAPABILITY","role":null}},
+    {"id":"R15","description":"Required role not available","input":{"kind":"complex","capable_model_available":false},"expected":{"action":"NO_CAPABLE_MODEL","role":null}},
+    {"id":"R16","description":"Model calls not needed for local tool","input":{"kind":"mechanical","certified_deterministic":true,"capable_model_available":false,"privacy_allows_candidate":false},"expected":{"action":"execute","role":"D"}},
+    {"id":"R17","description":"Planner cannot declare causal interpretation mechanical","input":{"kind":"mechanical","signals":["causal_judgment"]},"expected":{"action":"execute","role":"H"}},
+    {"id":"R18","description":"Conflicting constraints require H","input":{"kind":"standard","signals":["coupled_constraints"]},"expected":{"action":"execute","role":"H"}},
+    {"id":"R19","description":"Mechanical label without matching tool must be repaired","input":{"kind":"mechanical","signals":["fixed_transform"]},"expected":{"action":"PLAN_INVALID","role":null}},
+    {"id":"R20","description":"Required alternative evaluation is H","input":{"kind":"complex","signals":["alternative_evaluation"]},"expected":{"action":"execute","role":"H"}},
+    {"id":"R21","description":"Basic model role ignores price catalog changes","input":{"kind":"standard"},"metamorphic":{"change":"prices_and_remaining_credit","expected":"same_role"},"expected":{"action":"execute","role":"M"}},
+    {"id":"R22","description":"Overclassified deterministic registry operation uses tool","input":{"kind":"complex","certified_deterministic":true,"signals":["fixed_transform"]},"expected":{"action":"execute","role":"D"}}
+  ]
+}

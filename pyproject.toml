@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kelly-office-agent"
+version = "0.1.0"
+description = "A small local office agent with task-aware model routing."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.11,<3", "fastapi>=0.115,<1", "uvicorn>=0.34,<1",
+  "httpx>=0.28,<1", "tzdata>=2025; sys_platform == 'win32'",
+  "python-docx>=1.2,<2", "openpyxl>=3.1.5,<4", "pypdf>=5.9,<7",
+  "defusedxml>=0.7,<1",
+]
+
+[project.scripts]
+kelly = "birkin_lite.__main__:main"
+blite = "birkin_lite.__main__:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.12,<1", "playwright>=1.54,<2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/birkin_lite"]

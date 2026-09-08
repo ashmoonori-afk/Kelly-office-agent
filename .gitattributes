@@ -1,0 +1,12 @@
+* text=auto eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.png binary
+# Preserve the upstream notices verbatim, including their whitespace.
+src/birkin_lite/licenses/third-party.txt -whitespace

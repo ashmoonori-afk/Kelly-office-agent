@@ -1,0 +1,31 @@
+# xAI 연결 계약
+
+검토일: 2026-09-08. 실제 계정 호출 없이 `httpx.MockTransport`로 검증했다. API 키가 준비된 뒤 계정별 모델 조회와 유료 smoke 검사가 별도로 필요하다.
+
+`XAIClient(api_key, *, http_transport=None)`는 HTTPS 클라이언트 하나를 재사용한다. `with` 또는 `close()`로 닫는다. `.transport(request, binding)`와 `.complete(request, binding)`는 같은 단일 전송이다. 업무 실행은 반드시 기존 `metered_complete(..., transport=client.transport)`를 통해 호출한다. 어댑터에 가격이나 역할 선택을 넣지 않는다.
+
+`list_models(timeout_s=10)`은 `GET /v1/models` 응답의 모델 ID만 반환한다. 가용성은 그 API 키에 관한 관측이며 구조화 출력, 품질, 추론 설정 지원을 증명하지 않는다. 모델 목록에 있는 가격은 여기서 사용하지 않는다. [공식 API 계약](https://api.x.ai/api-docs/openapi.json)
+
+생성 요청은 `POST /v1/chat/completions` 한 번이다. Bearer 인증, TLS 검증, 프록시 환경변수 무시, 리다이렉트 금지, SDK/HTTP 내부 재시도 0회, `stream:false`, `n:1`, 도구 없음이 고정된다. 요청의 timeout을 HTTP 각 단계에 적용하고, 디코딩한 응답이 1MiB를 넘으면 읽기를 중단한다. 연결 오류나 429/5xx 재시도는 계측 wrapper만 담당한다. Read timeout 뒤에는 청구 여부를 추측하지 않는다.
+
+`response_format.json_schema`에 원래 출력 스키마와 `strict:true`를 넣는다. 선택 필드와 순환하지 않는 `$ref/$defs`는 유지한다. `discriminator` 주석만 제거한다. xAI의 `oneOf`는 `anyOf`처럼 동작하므로 필수 키와 닫힌 객체 또는 구별되는 상수로 대안의 배타성을 증명할 수 없는 경우 전송 전에 거부한다. 순환 참조와 문서상 거부되는 형식도 거부한다. 제약을 삭제해 전송을 성공시키지 않는다. 일부 길이·개수 제약은 공급자 보장 범위를 넘을 수 있으므로 기존 Pydantic 계약으로 응답을 다시 검증한다. [구조화 출력 지원 범위](https://docs.x.ai/developers/model-capabilities/text/structured-outputs)
+
+사용량 정규화는 이 엔드포인트에만 적용한다. 입력은 `prompt_tokens`, 캐시 입력은 그 부분집합이다. 출력은 `completion_tokens + completion_tokens_details.reasoning_tokens`이며 추론 토큰을 다시 더하지 않는다. 공식 응답 예의 32 입력·9 가시 출력·94 추론은 총 135, 정규화 출력 103이다. `total_tokens`와 모순되면 출력 합계를 unknown으로 남기고 숫자 사용량 원문과 검증 가능한 입력을 보존한다. 없는 캐시 쓰기나 추론 값은 0으로 만들지 않는다. [Chat Completions 응답 예와 Usage 정의](https://api.x.ai/api-docs/openapi.json)
+
+`max_completion_tokens`는 가시 출력에만 적용되며 추론·함수 호출 토큰을 포함하는 총생성량 상한이 아니다. 추론 노력 값은 선택된 binding의 허용목록과 공급자 지원 범위를 함께 확인한다. [공식 요청 필드 정의](https://api.x.ai/api-docs/openapi.json)
+
+HTTP 오류·거절·잘못된 JSON 내용·출력 잘림·계약 불일치도 이미 읽은 사용량을 `TransportError`에 담아 정산하게 한다. 응답 전체가 잘못된 JSON이거나 크기 제한/타임아웃으로 완전히 읽지 못한 경우 사용량을 추측하여 추출하지 않는다. 프롬프트, 본문, 비밀값은 예외나 호출 원장에 기록하지 않으며 사용량은 알려진 숫자 필드만 남긴다.
+
+## 합성 연결 검사 실행
+
+키는 실행 프로세스의 `XAI_API_KEY` 환경변수를 우선 읽고, 없을 때 설정 화면에서 저장한 현재 Windows 사용자 DPAPI 저장소를 읽는다. `config.example.json`을 별도 설정 파일로 복사하고 실제 계정의 모델 ID, `enabled:true`, 허용 프로젝트, `M` 역할, `structured_output`·`planning` 기능을 설정한 뒤 다음 명령을 실행한다. 예제의 모델 ID는 실제 가용 모델을 뜻하지 않으며 기본값은 비활성 상태다.
+
+```powershell
+.\.venv\Scripts\python.exe -m birkin_lite.live_smoke --config .\config.json --model YOUR_ACCOUNT_MODEL_ID --allow-live
+```
+
+`--allow-live`가 없으면 파일·키를 읽거나 HTTP 요청을 보내기 전에 거부한다. 명시된 실행은 계정 모델 목록 조회 1회와 합성 계획 생성 최대 1회를 수행한다. 연결 오류, 429, 5xx, 잘못된 내용에도 생성 재시도·스키마 수정 호출은 하지 않는다. 가시 출력 상한은 설정값과 1,024 중 작은 값이며 추론 토큰의 총량 상한을 의미하지 않는다. 이 검사는 실제 API 사용료가 발생할 수 있다.
+
+입력은 프로그램에 고정한 합성 문장뿐이다. `PlanningResultV1` 검증을 통과하고 TODO가 정확히 하나이며 제목이 `LIVE_MODEL_OK`와 일치할 때만 `accepted:true`로 기록한다. 생성한 계획을 설치하거나 실행하지 않는다. 성공 여부와 별개로 받은 사용량은 `<home>/evidence/provider-probe.db`의 호출 원장에 남기고, 실패 응답에서 사용량을 관측하지 못하면 null과 unknown을 보존한다.
+
+결과 JSON은 `<home>/evidence/provider-live-<run_id>.json`에 새 파일로 저장된다. 테스트에서 `http_transport`를 주입하면 파일 이름은 `provider-mock-<run_id>.json`이며 결과와 증거의 `live`는 항상 false다. 모든 연결 검사 결과의 `qualified_for_office`는 false이며, 연결 성공으로 모델 품질 자격이나 Office 실제 실행 성공을 인정하지 않는다. 현재 증거는 `tests/test_live_smoke.py`의 모의 HTTP 계약 검증이며 실제 계정 호출은 아직 수행하지 않았다.

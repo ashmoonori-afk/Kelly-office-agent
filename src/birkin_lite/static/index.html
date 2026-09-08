@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Kelly · 작은 업무 공간</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/app.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <section id="login" class="login-card" aria-labelledby="login-title">
+      <div class="login-art" aria-hidden="true">
+        <img src="/static/kelly-companion.png" alt="" />
+        <p>조금 덜 바쁜 하루,<br />Kelly와 함께.</p>
+      </div>
+      <div class="login-content">
+        <span class="brand-mark" aria-hidden="true">k.</span>
+        <p class="eyebrow">KELLY OFFICE AGENT</p>
+        <h1 id="login-title">나만의 업무 공간을<br />열어볼까요?</h1>
+        <p class="muted">이 기기에서 발급한 연결 코드를 입력해 주세요.</p>
+        <form id="login-form">
+          <label for="bootstrap-code">일회용 연결 코드</label>
+          <input
+            id="bootstrap-code"
+            type="password"
+            required
+            autocomplete="off"
+            maxlength="256"
+            autofocus
+          />
+          <button class="primary" type="submit">업무 공간 열기</button>
+        </form>
+        <p id="login-message" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <div id="app" hidden>
+      <header class="topbar">
+        <a class="brand" href="#main"
+          ><span class="brand-mark" aria-hidden="true">k.</span
+          ><span>Kelly <strong>Office</strong></span></a
+        >
+        <div class="top-actions">
+          <span class="local-pill"
+            ><span aria-hidden="true">●</span> 내 기기에서 실행</span
+          >
+          <label class="project-label" for="project">프로젝트</label
+          ><select id="project" aria-label="프로젝트"></select>
+          <button id="open-settings" class="quiet">설정</button>
+        </div>
+      </header>
+      <div class="shell">
+        <nav class="sidebar" aria-label="주요 메뉴">
+          <p class="nav-caption">WORKSPACE</p>
+          <div class="nav-items">
+            <button data-view="conversation" aria-current="page">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M7 18l-4 3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H7z"
+                />
+                <path d="M8 8h8M8 12h5" />
+              </svg>
+              대화
+            </button>
+            <button data-view="automations">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M20 7H8a4 4 0 0 0-4 4M16 3l4 4-4 4M4 17h12a4 4 0 0 0 4-4M8 13l-4 4 4 4"
+                />
+              </svg>
+              자동화
+            </button>
+            <button data-view="history">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              기록
+            </button>
+          </div>
+          <div class="sidebar-note">
+            <span class="note-star" aria-hidden="true">✳</span
+            ><strong>차근차근, 필요한 만큼.</strong>
+            <p>작은 할 일로 나누고<br />알맞은 방법으로 처리해요.</p>
+          </div>
+          <p id="connection-state" class="connection-state">연결 확인 중</p>
+        </nav>
+        <main id="main" tabindex="-1">
+          <div
+            id="notice"
+            class="notice"
+            role="status"
+            aria-live="polite"
+            hidden
+          ></div>
+          <section id="view-conversation" aria-labelledby="conversation-title">
+            <div class="page-heading">
+              <div>
+                <p class="eyebrow">
+                  MY DESK
+                  <span class="eyebrow-rule" aria-hidden="true"></span> 조금 더
+                  가벼운 하루
+                </p>
+                <h1 id="conversation-title">오늘, 무엇을 정리할까요?</h1>
+                <p class="muted">
+                  자료를 더하고, 필요한 일을 적어주세요. 나머지는 함께 정리해요.
+                </p>
+              </div>
+            </div>
+            <div class="work-grid">
+              <section class="card composer" aria-labelledby="request-title">
+                <div class="composer-heading">
+                  <h2 id="request-title">새 업무</h2>
+                  <span class="tag">NEW REQUEST</span>
+                </div>
+                <form id="run-form">
+                  <label for="request">업무 요청</label>
+                  <textarea
+                    id="request"
+                    rows="4"
+                    maxlength="8000"
+                    required
+                    placeholder="예: 이 자료에서 금액 합계를 구해줘"
+                  ></textarea>
+                  <div class="form-row">
+                    <div>
+                      <label for="output-format">결과 형식</label
+                      ><select id="output-format">
+                        <option value="docx">Word 문서</option>
+                        <option value="xlsx">Excel 표</option>
+                        <option value="md">Markdown</option>
+                        <option value="text">텍스트</option>
+                        <option value="csv">CSV</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label for="quality">검토 수준</label
+                      ><select id="quality">
+                        <option value="balanced">기본 검토</option>
+                        <option value="high">정밀 의미 검토</option>
+                      </select>
+                    </div>
+                  </div>
+                  <details class="review-help">
+                    <summary>검토 수준은 어떻게 다른가요?</summary>
+                    <p class="field-note">
+                      정밀 검토는 자연어 결과의 의미를 더 확인합니다. 계산에는
+                      모델 검토를 추가하지 않습니다.
+                    </p>
+                  </details>
+                  <fieldset id="source-field" class="source-field" hidden>
+                    <legend>함께 사용할 자료</legend>
+                    <div id="source-choices" class="source-choices">
+                      <p class="muted">등록한 자료가 없습니다.</p>
+                    </div>
+                  </fieldset>
+                  <div class="upload-zone">
+                    <label for="upload-files" class="file-label"
+                      ><span class="upload-icon" aria-hidden="true">＋</span
+                      ><strong>파일을 골라 자료 추가</strong
+                      ><span
+                        >TXT · MD · CSV · XLSX · DOCX · PDF · 최대 25 MB</span
+                      ></label
+                    >
+                    <input
+                      id="upload-files"
+                      type="file"
+                      multiple
+                      accept=".txt,.md,.csv,.xlsx,.docx,.pdf"
+                    />
+                  </div>
+                  <div class="form-footer">
+                    <span id="attachment-count" class="muted"
+                      >자료 0개 선택</span
+                    ><button class="primary" id="run-submit" type="submit">
+                      업무 시작 <span aria-hidden="true">↗</span>
+                    </button>
+                  </div>
+                </form>
+                <div class="example">
+                  <span class="example-icon" aria-hidden="true">↗</span>
+                  <div>
+                    <span class="tag">TRY KELLY</span>
+                    <p>처음이라면, 작은 표 하나부터.</p>
+                    <button id="example" class="link-button">
+                      예제 자료 준비하기 →</button
+                    ><small
+                      >합성 CSV로 35,000원 합계 확인 · 모델 호출 없이</small
+                    >
+                  </div>
+                </div>
+              </section>
+              <div class="run-column">
+                <section id="run-empty" class="empty-work">
+                  <p class="eyebrow">A LITTLE HELP, A LOT MORE SPACE</p>
+                  <img
+                    class="companion"
+                    src="/static/kelly-companion.png"
+                    width="280"
+                    height="280"
+                    alt="종이로 만든 Kelly가 서류를 정리하는 모습"
+                  />
+                  <h2>할 일은 차근차근.<br />결과는 한눈에.</h2>
+                  <p>
+                    업무를 시작하면 진행 과정과<br />완성된 파일이 이곳에
+                    모여요.
+                  </p>
+                  <div class="legend">
+                    <span><b>01</b> 자료 추가</span
+                    ><span><b>02</b> 업무 요청</span
+                    ><span><b>03</b> 결과 확인</span>
+                  </div>
+                </section>
+                <section
+                  id="run-detail"
+                  class="card"
+                  hidden
+                  aria-labelledby="run-title"
+                >
+                  <div class="section-top">
+                    <div>
+                      <p
+                        id="run-status"
+                        class="eyebrow"
+                        role="status"
+                        aria-live="polite"
+                        aria-atomic="true"
+                      ></p>
+                      <h2 id="run-title" tabindex="-1">선택한 업무</h2>
+                    </div>
+                    <button id="cancel-run" class="quiet danger">
+                      업무 취소
+                    </button>
+                  </div>
+                  <p id="run-error" class="error-text" hidden></p>
+                  <button id="retry-compose" class="quiet" hidden>
+                    이 업무로 새 요청 준비
+                  </button>
+                  <div id="run-results" class="results"></div>
+                  <div class="progress-heading">
+                    <h3>처리 과정</h3>
+                    <span id="progress-count" class="muted"></span>
+                  </div>
+                  <progress
+                    id="run-progress"
+                    max="1"
+                    value="0"
+                    aria-label="할 일 완료 진행률"
+                  ></progress>
+                  <ol id="todos" class="todo-list"></ol>
+                  <div id="run-approvals"></div>
+                  <details id="input-details" hidden>
+                    <summary>부족한 입력 보완하기</summary>
+                    <form id="input-form" class="stack">
+                      <label for="input-intent">업무 종류</label
+                      ><select id="input-intent">
+                        <option value="aggregate">표 집계</option>
+                        <option value="summarize">자료 요약</option>
+                        <option value="weekly_report">보고서</option>
+                        <option value="meeting_actions">회의 할 일</option>
+                        <option value="draft_reply">답장 초안</option>
+                        <option value="search_answer">자료에서 찾기</option>
+                        <option value="custom">현재 업무 유지</option>
+                      </select>
+                      <fieldset>
+                        <legend>사용할 자료</legend>
+                        <div id="input-sources" class="source-choices"></div>
+                      </fieldset>
+                      <div class="form-row">
+                        <div>
+                          <label for="input-sheet">시트 이름</label
+                          ><input
+                            id="input-sheet"
+                            maxlength="100"
+                            placeholder="필요할 때만 입력"
+                          />
+                        </div>
+                        <div>
+                          <label for="input-range">셀 범위</label
+                          ><input
+                            id="input-range"
+                            maxlength="100"
+                            placeholder="예: A1:D20"
+                          />
+                        </div>
+                      </div>
+                      <label for="input-values"
+                        >합산할 값 열 · 쉼표로 구분</label
+                      ><input id="input-values" placeholder="예: 금액, 수량" />
+                      <label for="input-group">묶을 기준 열</label
+                      ><input
+                        id="input-group"
+                        maxlength="200"
+                        placeholder="예: 부서"
+                      />
+                      <label for="input-query">찾을 내용</label
+                      ><input id="input-query" maxlength="500" />
+                      <label for="input-acceptance"
+                        >완료 조건 · 한 줄에 하나</label
+                      ><textarea
+                        id="input-acceptance"
+                        rows="3"
+                        required
+                      ></textarea>
+                      <button class="primary" type="submit">
+                        입력 보완하고 계속하기
+                      </button>
+                    </form>
+                  </details>
+                  <div id="run-deliveries"></div>
+                  <details>
+                    <summary>검증과 사용량 자세히</summary>
+                    <div id="run-usage"></div>
+                    <div id="run-evidence"></div>
+                  </details>
+                </section>
+              </div>
+            </div>
+          </section>
+
+          <section
+            id="view-automations"
+            hidden
+            aria-labelledby="automations-title"
+          >
+            <div class="page-heading">
+              <div>
+                <p class="eyebrow">A STEADY ROUTINE</p>
+                <h1 id="automations-title">반복 업무는 맡겨 두세요.</h1>
+                <p class="muted">
+                  자료와 실행 시각을 정하고, 검토한 뒤 활성화합니다.
+                </p>
+              </div>
+              <button id="new-automation" class="primary">자동화 만들기</button>
+            </div>
+            <div id="automation-list" class="automation-grid"></div>
+            <details id="automation-editor" class="card">
+              <summary id="automation-editor-title">새 자동화 검토안</summary>
+              <form id="automation-form" class="stack">
+                <div class="form-row">
+                  <div>
+                    <label for="auto-name">이름</label
+                    ><input
+                      id="auto-name"
+                      required
+                      maxlength="200"
+                      placeholder="예: 매일 아침 업무 브리핑"
+                    />
+                  </div>
+                  <div>
+                    <label for="auto-recipe">업무 종류</label
+                    ><select id="auto-recipe">
+                      <option value="aggregate">표 집계</option>
+                      <option value="summarize">자료 요약</option>
+                      <option value="weekly_report">보고서</option>
+                      <option value="meeting_actions">회의 할 일</option>
+                      <option value="draft_reply">답장 초안</option>
+                      <option value="search_answer">자료에서 찾기</option>
+                    </select>
+                  </div>
+                </div>
+                <label for="auto-instruction">업무 지시</label
+                ><textarea
+                  id="auto-instruction"
+                  rows="3"
+                  required
+                  maxlength="8000"
+                ></textarea>
+                <div class="form-row">
+                  <div>
+                    <label for="auto-trigger">실행 조건</label
+                    ><select id="auto-trigger">
+                      <option value="daily">매일</option>
+                      <option value="weekly">선택한 요일</option>
+                      <option value="once">한 번</option>
+                      <option value="interval">일정 간격</option>
+                      <option value="file_changed">
+                        폴더의 파일이 바뀔 때
+                      </option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="auto-timezone">시간대</label
+                    ><input id="auto-timezone" value="Asia/Seoul" required />
+                  </div>
+                </div>
+                <div data-triggers="once interval">
+                  <label for="auto-at">첫 실행 시각 · 이 기기의 현지 시각</label
+                  ><input id="auto-at" type="datetime-local" />
+                </div>
+                <div data-triggers="daily weekly">
+                  <label for="auto-time">실행 시각 · 선택한 시간대</label
+                  ><input id="auto-time" type="time" value="09:00" />
+                  <fieldset>
+                    <legend>실행 요일</legend>
+                    <div id="auto-weekdays" class="check-row"></div>
+                  </fieldset>
+                </div>
+                <div data-triggers="interval">
+                  <label for="auto-interval">실행 간격 · 분</label
+                  ><input id="auto-interval" type="number" min="5" value="60" />
+                </div>
+                <div data-triggers="file_changed">
+                  <label for="auto-poll">파일 확인 간격 · 초</label
+                  ><input
+                    id="auto-poll"
+                    type="number"
+                    min="60"
+                    value="60"
+                  /><label class="check"
+                    ><input id="auto-initial" type="checkbox" />처음 발견한
+                    자료로도 한 번 실행</label
+                  >
+                </div>
+                <div class="form-row">
+                  <div>
+                    <label for="auto-missed">꺼져 있던 동안 놓친 실행</label
+                    ><select id="auto-missed">
+                      <option value="latest_once">
+                        최근 24시간 내 마지막 한 번
+                      </option>
+                      <option value="skip">건너뛰기</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="auto-limit">하루 최대 실행 횟수</label
+                    ><input
+                      id="auto-limit"
+                      type="number"
+                      min="1"
+                      max="100"
+                      value="10"
+                      required
+                    />
+                  </div>
+                </div>
+                <label for="auto-source-mode">자료 범위</label
+                ><select id="auto-source-mode">
+                  <option value="none">자료 없이 실행</option>
+                  <option value="files">선택한 자료</option>
+                  <option value="folder">등록한 폴더</option>
+                </select>
+                <fieldset id="auto-files-field" hidden>
+                  <legend>자동화에 사용할 자료</legend>
+                  <div id="auto-sources" class="source-choices"></div>
+                </fieldset>
+                <div id="auto-folder-field" hidden>
+                  <label for="auto-folder">등록한 폴더</label
+                  ><select id="auto-folder"></select
+                  ><label for="auto-max-files"
+                    >폴더에서 사용할 최대 파일 수</label
+                  ><input
+                    id="auto-max-files"
+                    type="number"
+                    min="1"
+                    max="20"
+                    value="10"
+                  />
+                  <p class="field-note">
+                    하위 폴더는 읽지 않습니다. 폴더 등록은 설정에서 할 수
+                    있습니다.
+                  </p>
+                </div>
+                <div class="form-row">
+                  <div>
+                    <label for="auto-output">결과 형식</label
+                    ><select id="auto-output">
+                      <option value="docx">Word 문서</option>
+                      <option value="xlsx">Excel 표</option>
+                      <option value="csv">CSV</option>
+                      <option value="md">Markdown</option>
+                      <option value="text">텍스트</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="auto-delivery">결과를 확인할 곳</label
+                    ><select id="auto-delivery">
+                      <option value="local">이 업무 공간</option>
+                      <option value="telegram">연결한 내 Telegram</option>
+                    </select>
+                  </div>
+                </div>
+                <label id="auto-send-field" class="check" hidden
+                  ><input id="auto-send" type="checkbox" />연결한 내
+                  Telegram으로 결과를 보내도록 허용합니다.</label
+                >
+                <div class="form-footer">
+                  <button id="cancel-auto-edit" type="button" class="quiet">
+                    편집 닫기</button
+                  ><button type="submit" class="primary">검토안 저장</button>
+                </div>
+              </form>
+            </details>
+          </section>
+
+          <section id="view-history" hidden aria-labelledby="history-title">
+            <div class="page-heading">
+              <div>
+                <p class="eyebrow">WORK, WITH A RECORD</p>
+                <h1 id="history-title">업무 기록</h1>
+                <p class="muted">결과 생성과 전달 상태를 구분해 확인합니다.</p>
+              </div>
+              <button id="refresh-history" class="quiet">새로고침</button>
+            </div>
+            <div id="usage-overview" class="usage-grid"></div>
+            <div id="history-list" class="card history-list"></div>
+          </section>
+        </main>
+      </div>
+      <footer class="footer">
+        Kelly Office <span>내 기기에서 시작하는 업무</span>
+      </footer>
+    </div>
+
+    <dialog id="preview-dialog" aria-labelledby="preview-title">
+      <div class="dialog-heading">
+        <h2 id="preview-title">이 자동화를 활성화할까요?</h2>
+        <button
+          class="quiet"
+          data-close="preview-dialog"
+          aria-label="자동화 검토 닫기"
+        >
+          닫기
+        </button>
+      </div>
+      <p class="muted">아래에 표시된 범위로만 읽고 새 결과를 만듭니다.</p>
+      <div id="automation-preview"></div>
+      <p class="dialog-status" role="status" aria-live="polite"></p>
+      <button id="enable-automation" class="primary">
+        검토한 범위로 활성화
+      </button>
+    </dialog>
+
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">YOUR WORKSPACE</p>
+          <h2 id="settings-title">설정</h2>
+        </div>
+        <button class="quiet" data-close="settings-dialog">닫기</button>
+      </div>
+      <p class="dialog-status" role="status" aria-live="polite"></p>
+      <details open>
+        <summary>모델과 자료 사용 범위</summary>
+        <p class="muted">
+          난도에 맞춰 L·M·H를 배정합니다. 가용성과 품질 자격을 확인한 모델만
+          사용합니다.
+        </p>
+        <div id="model-status"></div>
+        <button id="check-models" class="quiet">계정 모델 목록 확인</button>
+        <p class="field-note">
+          목록 조회만 합니다. 유료 생성이나 품질 평가를 실행하지 않습니다.
+        </p>
+        <form id="settings-form" class="stack">
+          <div id="model-profiles"></div>
+          <button id="add-model" type="button" class="quiet">
+            모델 프로필 추가
+          </button>
+          <fieldset>
+            <legend>이 프로젝트의 자료</legend>
+            <label class="check"
+              ><input id="privacy-cloud" type="checkbox" />이 프로젝트 자료를
+              xAI API에 보내도록 허용</label
+            ><label class="check"
+              ><input id="privacy-local" type="checkbox" />로컬 처리만
+              허용</label
+            >
+          </fieldset>
+          <fieldset>
+            <legend>Telegram 연결 설정</legend>
+            <label class="check"
+              ><input id="telegram-enabled" type="checkbox" />Telegram 수신과
+              허용된 결과 전달 사용</label
+            ><label for="telegram-connection">연결 이름</label
+            ><input
+              id="telegram-connection"
+              value="telegram"
+              required
+              pattern="[A-Za-z0-9][A-Za-z0-9_-]*"
+              maxlength="96"
+            /><label for="telegram-project">Telegram 업무 프로젝트</label
+            ><select id="telegram-project"></select>
+            <p id="telegram-state" class="field-note"></p>
+          </fieldset>
+          <button type="submit" class="primary">설정 저장</button>
+        </form>
+      </details>
+      <details>
+        <summary>API 키와 Telegram pairing</summary>
+        <p id="key-state" class="muted"></p>
+        <form id="secret-form" class="stack">
+          <label for="secret-provider">키 종류</label
+          ><select id="secret-provider">
+            <option value="xai">xAI API 키</option>
+            <option value="telegram">Telegram Bot 토큰</option></select
+          ><label for="secret-value">API 키</label
+          ><input
+            id="secret-value"
+            type="password"
+            autocomplete="new-password"
+            maxlength="4096"
+          /><label class="check"
+            ><input id="secret-confirm" type="checkbox" required />내 키를 이
+            기기의 보호된 저장소에 저장하는 데 동의합니다.</label
+          >
+          <p class="field-note">
+            값을 비우고 저장하면 선택한 키를 삭제합니다. 키는 일반 설정과
+            분리하며 저장 요청 후 입력란을 비웁니다.
+          </p>
+          <button type="submit" class="primary">키 저장 또는 삭제</button>
+        </form>
+        <hr />
+        <button id="create-pairing" class="quiet">
+          Telegram 연결 코드 만들기
+        </button>
+        <p id="pairing-code" class="pairing-code"></p>
+        <p id="pairing-expiry" class="field-note">
+          먼저 Telegram 토큰과 연결 설정을 저장해 주세요.
+        </p>
+      </details>
+      <details>
+        <summary>자동화가 읽을 폴더</summary>
+        <div id="folder-list"></div>
+        <form id="folder-form" class="stack">
+          <label for="folder-path">이 기기의 폴더 절대경로</label
+          ><input
+            id="folder-path"
+            required
+            maxlength="4096"
+            placeholder="C:\업무\자료"
+          /><label class="check"
+            ><input id="folder-confirm" type="checkbox" required />선택한
+            프로젝트의 자동화가 이 폴더의 자료를 읽도록 허용합니다.</label
+          ><button type="submit" class="quiet">폴더 등록</button>
+        </form>
+      </details>
+      <details>
+        <summary>기억 · 명시적으로 저장한 내용</summary>
+        <form id="memory-search-form" class="search-row">
+          <label for="memory-query" class="sr-only">기억 검색</label
+          ><input
+            id="memory-query"
+            maxlength="500"
+            placeholder="선호, 결정, 양식 검색"
+          /><button class="quiet">찾기</button>
+        </form>
+        <div id="memory-list"></div>
+        <form id="memory-form" class="stack">
+          <label for="memory-category">기억 종류</label
+          ><select id="memory-category">
+            <option value="preference">선호</option>
+            <option value="decision">프로젝트 결정</option>
+            <option value="template">양식</option></select
+          ><label for="memory-text">기억할 내용</label
+          ><textarea
+            id="memory-text"
+            rows="3"
+            required
+            maxlength="8000"
+          ></textarea
+          ><label for="memory-expires">만료 시각 · 선택 사항</label
+          ><input id="memory-expires" type="datetime-local" />
+          <div class="form-footer">
+            <button id="memory-new" type="button" class="quiet">새 내용</button
+            ><button id="memory-save" class="primary">기억 저장</button>
+          </div>
+        </form>
+      </details>
+      <details>
+        <summary>현재 지원 상태</summary>
+        <div id="capabilities"></div>
+        <p class="field-note">
+          구조 검증과 실제 화면 확인, 모델 목록 조회와 품질 검증을 구분해
+          표시합니다.
+        </p>
+      </details>
+    </dialog>
+  </body>
+</html>

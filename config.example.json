@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "home": ".",
+  "actor_id": "owner",
+  "project_ids": ["default"],
+  "host": "127.0.0.1",
+  "port": 8765,
+  "privacy": [{"project_id": "default", "allowed_providers": [], "allow_cloud": false, "local_only": false, "revision": 1}],
+  "models": [{
+    "binding": {
+      "provider": "xai",
+      "model_id": "REPLACE_WITH_ACCOUNT_MODEL_ID",
+      "roles": ["L", "M", "H"],
+      "role": null,
+      "enabled": false,
+      "available": false,
+      "allowed_projects": ["default"],
+      "capabilities": ["structured_output", "planning", "summarize", "report_prose", "meeting_actions", "draft_reply", "search_answer", "analyze", "semantic_review"],
+      "context_window": 16000,
+      "max_output": 1000,
+      "request_timeout_s": 60,
+      "reasoning_efforts": [],
+      "reasoning_effort": null,
+      "quality_evidence_id": null,
+      "metering_mode": "api"
+    },
+    "price_snapshot": {"rates": {"input": null, "cached_input": null, "cache_write": null, "output": null}, "checked_at": null, "source_url": null, "cache_write_billing": "unknown"},
+    "quality_evidence_sha256": null
+  }],
+  "spend_guard_enabled": false
+}
