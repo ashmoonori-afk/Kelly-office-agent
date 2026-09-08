@@ -445,7 +445,74 @@ def snapshot_folder(home, conn, actor, folder_id, max_files, previous, currentcl
         return observation
 
 
-def tick_automations(conn, home, actor, now):
+def record_daemon_observation(conn, actor, session_id, kind, now):
+    """Persist sampled process observations; gaps never imply a PC power state."""
+    from .db import get_value, set_value
+
+    now = _utc(now).isoformat()
+    key = "daemon_session:" + session_id
+    previous = get_value(conn, key)
+    if kind == "start":
+        if previous is not None:
+            raise AppError("CONFLICT", status=409)
+        record = {
+            "session_id": session_id,
+            "actor_id": actor.id,
+            "started_at": now,
+            "previous_tick_at": None,
+            "last_tick_at": None,
+            "stopped_at": None,
+            "clock_rollback": False,
+        }
+    else:
+        if kind not in {"tick", "stop"} or not previous or previous["actor_id"] != actor.id:
+            raise AppError("POLICY_DENIED")
+        if previous["stopped_at"] is not None:
+            raise AppError("CONFLICT", status=409)
+        record = dict(previous)
+        record["clock_rollback"] |= _utc(now) < _utc(
+            previous["last_tick_at"] or previous["started_at"]
+        )
+        if kind == "tick":
+            record["previous_tick_at"] = previous["last_tick_at"]
+            record["last_tick_at"] = now
+        else:
+            record["stopped_at"] = now
+    set_value(conn, key, record, now=now)
+    return record
+
+
+def _event_observation(event, inbox, observation, now):
+    snapshot = observation or {}
+    samples = [snapshot.get(key) for key in ("started_at", "previous_tick_at", "last_tick_at")]
+    rollback = bool(snapshot.get("clock_rollback")) or any(
+        _utc(now) < _utc(value) for value in samples if value is not None
+    )
+    return {
+        "schema_version": 1,
+        "actor_id": event.actor_id,
+        "project_id": event.project_id,
+        "automation_id": event.automation_id,
+        "event_key": event.event_key,
+        "daemon_session_id": snapshot.get("session_id"),
+        "scheduled_utc": event.scheduled_utc,
+        "event_received_at": inbox["received_at"],
+        "started_at": snapshot.get("started_at"),
+        "previous_tick_at": snapshot.get("previous_tick_at"),
+        "tick_at": snapshot.get("last_tick_at"),
+        "observed_at": now.isoformat(),
+        "clock_rollback": rollback,
+        "scheduled_daemon_state": "observed"
+        if observation
+        and event.scheduled_utc is not None
+        and not rollback
+        and event.scheduled_utc in [*samples, now.isoformat()]
+        else "unknown",
+        "pc_power_state": "unknown",
+    }
+
+
+def tick_automations(conn, home, actor, now, *, daemon_session_id=None):
     """Run one scheduler tick and return newly/enqueued run rows (never execute them).
 
     File polling happens at most once per configured interval, before any filesystem IO.
@@ -458,7 +525,14 @@ def tick_automations(conn, home, actor, now):
 
     if conn.in_transaction:
         raise AppError("CONFLICT", status=409)
-    now, runs = _utc(now), []
+    supplied_now = now
+    clock = now if callable(now) else lambda: supplied_now
+    now, runs = _utc(clock()), []
+    observation = (
+        record_daemon_observation(conn, actor, daemon_session_id, "tick", now)
+        if daemon_session_id is not None
+        else None
+    )
     rows = [
         row_dict(row)
         for row in conn.execute(
@@ -467,6 +541,7 @@ def tick_automations(conn, home, actor, now):
         )
     ]
     for row in rows:
+        now = _utc(clock())
         state_key = "automation_state:" + row["id"]
         attempted_poll = False
         try:
@@ -507,6 +582,7 @@ def tick_automations(conn, home, actor, now):
                     can_detect = poll_due
                 else:
                     can_detect = state.get("current", {}).get("stable") is True
+            now = _utc(clock())
             if can_detect:
                 events = detect_events(row, state, now)
             with transaction(conn):
@@ -530,7 +606,22 @@ def tick_automations(conn, home, actor, now):
                     )
                     if pending is not None:
                         event = Event.model_validate(pending["payload_json"])
+                now = _utc(clock())
                 result = enqueue_event_once(event, conn, actor=actor, now=now) if event else None
+                if event is not None:
+                    observation_key = "automation_observation:" + row["id"] + ":" + event.event_key
+                    inbox = conn.execute(
+                        "SELECT received_at FROM inbox_events WHERE source='automation' "
+                        "AND connection_id=? AND event_key=?",
+                        (row["id"], event.event_key),
+                    ).fetchone()
+                    if inbox is not None and get_value(conn, observation_key) is None:
+                        set_value(
+                            conn,
+                            observation_key,
+                            _event_observation(event, inbox, observation, now),
+                            now=now.isoformat(),
+                        )
                 state.pop("last_error", None)
                 set_value(conn, state_key, state, now=now.isoformat())
                 if "next_due" in state:

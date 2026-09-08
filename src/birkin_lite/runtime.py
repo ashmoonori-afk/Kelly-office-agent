@@ -3,6 +3,7 @@
 import asyncio
 import sqlite3
 import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import UTC, datetime
@@ -38,6 +39,7 @@ class Runtime:
         self._tasks = []
         self._shutdown_task = None
         self._wake = None
+        self._daemon_session_id = None
         self.last_errors = {}
 
     def catalog_snapshot(self):
@@ -124,6 +126,11 @@ class Runtime:
         )
         if any(isinstance(result, BaseException) for result in closed):
             self.last_errors["shutdown"] = "CLIENT_CLOSE_ERROR"
+        if self._daemon_session_id is not None:
+            try:
+                await self._submit("scheduler", self._record_shutdown)
+            except (AppError, OSError, ValueError, TypeError, sqlite3.Error):
+                self.last_errors["shutdown"] = "OBSERVATION_WRITE_ERROR"
         for executor in self._executors.values():
             executor.shutdown(wait=True)
         self._executors.clear()
@@ -133,7 +140,17 @@ class Runtime:
     def _bootstrap(self):
         with closing(db.init_db(self.db_path)) as conn:
             engine.resume_after_restart(conn, previous_process_is_dead=True)
+            self._daemon_session_id = uuid.uuid4().hex
+            automation.record_daemon_observation(
+                conn, self.actor, self._daemon_session_id, "start", _clock()
+            )
             self._work_service(conn, force=True)
+
+    def _record_shutdown(self):
+        with closing(db.init_db(self.db_path)) as conn:
+            automation.record_daemon_observation(
+                conn, self.actor, self._daemon_session_id, "stop", _clock()
+            )
 
     async def refresh(self):
         """Explicit settings changes may perform read-only account model discovery."""
@@ -388,7 +405,9 @@ class Runtime:
         if self._stopping.is_set() or self._lock.handle is None:
             return False
         with closing(db.init_db(self.db_path)) as conn:
-            automation.tick_automations(conn, self.home, self.actor, _clock())
+            automation.tick_automations(
+                conn, self.home, self.actor, _clock, daemon_session_id=self._daemon_session_id
+            )
             last = db.get_value(conn, "retention:last", {}).get("at")
             if last is None or (_clock() - datetime.fromisoformat(last)).total_seconds() >= 86400:
                 with self._work_guard:

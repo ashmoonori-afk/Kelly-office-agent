@@ -3,14 +3,16 @@
 import argparse
 import hashlib
 import os
+import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .config import home_path, load_config, probe_binding, read_xai_key
+from .config import home_path, load_config, probe_binding, read_xai_key, runtime_config
 from .context import build_plan_request
 from .contracts import AppError, PlanningResultV1, RunRequest, canonical_json
 from .db import create_run, init_db, row_dict
+from .operations import _database
 from .providers import TransportError, XAIClient, metered_complete
 from .safe_io import ensure_directory, guard_directory, rename_new
 
@@ -23,6 +25,12 @@ def run_probe(config_path, model_id, *, allow_live=False, http_transport=None):
     config_path = Path(config_path).absolute()
     config = load_config(config_path)
     home = home_path(config, config_path)
+    if (home / "state.db").exists():
+        try:
+            with _database(home) as stored:
+                config = runtime_config(config, stored)
+        except sqlite3.Error:
+            raise AppError("INVALID_INPUT") from None
     key = read_xai_key(home)
     if key is None:
         raise AppError("NO_CAPABLE_MODEL")

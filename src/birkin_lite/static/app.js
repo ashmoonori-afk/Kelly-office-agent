@@ -93,6 +93,13 @@ const formats = {
   xlsx: "Excel 표",
   docx: "Word 문서",
 };
+const purposes = {
+  plan: "계획",
+  generate: "생성",
+  repair: "보완",
+  review: "검토",
+  replan: "재계획",
+};
 const terminal = new Set([
   "succeeded",
   "failed",
@@ -424,7 +431,7 @@ function usageView(value) {
     [
       "측정된 비용",
       item.actual_micro_usd == null
-        ? "가격 미확인"
+        ? "비용 미확인"
         : "$" + (item.actual_micro_usd / 1000000).toFixed(6),
     ],
   ];
@@ -434,19 +441,113 @@ function usageView(value) {
     list.append(el("dt", {}, "가격 기준"), el("dd", {}, "현재 가격 확인 필요"));
   return list;
 }
+function callCostView(calls = []) {
+  if (!calls.length) return empty("모델 호출 비용이 없습니다.");
+  const counts = new Map(),
+    list = el("dl", { class: "usage-table" });
+  for (const call of [...calls].sort(
+    (a, b) => a.transport_attempt_no - b.transport_attempt_no,
+  )) {
+    const attempt = (counts.get(call.logical_call_no) || 0) + 1;
+    counts.set(call.logical_call_no, attempt);
+    const cost =
+      call.state === "released"
+        ? "전송 전 해제 · 합계 제외"
+        : call.actual_micro_usd == null
+          ? "비용 미확인"
+          : "$" + (call.actual_micro_usd / 1000000).toFixed(6);
+    list.append(
+      el(
+        "dt",
+        {},
+        "호출 " +
+          call.logical_call_no +
+          " · " +
+          (purposes[call.purpose] || call.purpose) +
+          " · " +
+          (attempt === 1 ? "첫 HTTP 시도" : "HTTP 재시도 " + (attempt - 1)),
+        el(
+          "small",
+          {},
+          " · 전체 시도 " +
+            call.transport_attempt_no +
+            " · " +
+            [call.provider, call.model_id].filter(Boolean).join(" / "),
+        ),
+      ),
+      el(
+        "dd",
+        {},
+        cost,
+        call.state !== "released"
+          ? el(
+              "small",
+              {},
+              " · " +
+                tr(call.usage_basis) +
+                (call.price_stale ? " · 현재 가격 확인 필요" : ""),
+            )
+          : null,
+      ),
+    );
+  }
+  return el(
+    "div",
+    {},
+    list,
+    el(
+      "p",
+      { class: "field-note" },
+      "비용이 미확인인 시도가 있으면 총비용도 미확인입니다. 전송 전 해제한 시도는 합계에서 제외합니다.",
+    ),
+  );
+}
+function automationObservationView(item) {
+  const list = el("dl", { class: "usage-table" });
+  for (const [label, value] of [
+    [
+      "예약 시각 프로그램 가동",
+      item?.scheduled_daemon_state === "observed" ? "관측됨" : "미확인",
+    ],
+    ["예약 시각 PC 전원", "미확인"],
+    ["예약 시각", item?.scheduled_utc ? date(item.scheduled_utc) : "기록 없음"],
+    [
+      "이벤트 수신",
+      item?.event_received_at ? date(item.event_received_at) : "기록 없음",
+    ],
+    ["프로그램 시작", item?.started_at ? date(item.started_at) : "기록 없음"],
+    [
+      "직전 확인",
+      item?.previous_tick_at ? date(item.previous_tick_at) : "기록 없음",
+    ],
+    ["이번 확인", item?.tick_at ? date(item.tick_at) : "기록 없음"],
+    ["관측 기록", item?.observed_at ? date(item.observed_at) : "기록 없음"],
+  ])
+    list.append(el("dt", {}, label), el("dd", {}, value));
+  return el(
+    "div",
+    {},
+    list,
+    el(
+      "p",
+      { class: "field-note" },
+      "프로그램이 기록한 시점만 확인할 수 있습니다. 기록 사이와 재시작 공백의 가동 여부 및 PC 전원 상태는 추정하지 않습니다.",
+    ),
+    item?.clock_rollback
+      ? el(
+          "p",
+          { class: "field-note" },
+          "시스템 시계가 뒤로 바뀐 기록이 있어 예약 시각 가동 여부는 미확인입니다.",
+        )
+      : null,
+  );
+}
 function todoView(step, calls = []) {
   const spec = step.spec_json || {},
     todo = spec.todo || {},
     executor = todo.executor || {},
     role = executor.type === "tool" ? "D" : executor.role || "미배정",
-    stepCalls = calls.filter((call) => call.step_id === step.id),
-    purposes = {
-      plan: "계획",
-      generate: "생성",
-      repair: "보완",
-      review: "검토",
-      replan: "재계획",
-    };
+    stepCalls = calls.filter((call) => call.step_id === step.id);
   const main = el(
     "div",
     { class: "todo-main" },
@@ -779,6 +880,15 @@ function renderRun(data) {
   );
   $("run-usage").replaceChildren(usageView(data.usage));
   $("run-evidence").replaceChildren(
+    details("첫 시도와 재시도 비용", callCostView(data.calls || [])),
+    ...(run.automation_id
+      ? [
+          details(
+            "예약 시각 가동 관측",
+            automationObservationView(data.automation_observation),
+          ),
+        ]
+      : []),
     details("완료 출력과 receipt", jsonView(run.result_json || {})),
     details("단계별 사용량", jsonView(data.usage?.by_step || {})),
   );

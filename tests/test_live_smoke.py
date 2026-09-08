@@ -6,8 +6,9 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from birkin_lite.config import AppConfig, ModelProfile, create_config, store_secret
+from birkin_lite.config import AppConfig, ModelProfile, create_config, load_config, store_secret
 from birkin_lite.contracts import AppError, ModelBinding, PlanningResultV1
+from birkin_lite.db import get_value, init_db, set_value
 from birkin_lite.live_smoke import main, run_probe
 
 
@@ -137,6 +138,47 @@ def test_probe_uses_the_same_protected_key_store_as_settings(tmp_path, monkeypat
     result = run_probe(path, "probe-fixture-model", allow_live=True, http_transport=transport)
     assert result["accepted"] and not result["live"]
     assert [request.method for request in seen] == ["GET", "POST"]
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_probe_uses_current_ui_model_settings_without_modifying_them(
+    tmp_path, monkeypatch, enabled
+):
+    path = configured(
+        tmp_path,
+        monkeypatch,
+        enabled=not enabled,
+        roles=["L"] if enabled else ["M"],
+        capabilities=["structured_output", "analyze"]
+        if enabled
+        else ["structured_output", "planning"],
+    )
+    original = path.read_bytes()
+    selected = load_config(path).models[0].model_dump()
+    selected["binding"].update(
+        enabled=enabled, roles=["M"], capabilities=["structured_output", "planning"]
+    )
+    settings = {"models": [selected]}
+    conn = init_db(tmp_path / "state.db")
+    try:
+        set_value(conn, "settings", settings)
+        transport, seen = mock_service(httpx.Response(200, json=response()))
+        if enabled:
+            result = run_probe(
+                path, "probe-fixture-model", allow_live=True, http_transport=transport
+            )
+            report = json.loads(Path(result["report"]).read_text(encoding="utf-8"))
+            assert result["accepted"] and not report["live"] and not report["qualified_for_office"]
+            assert [request.method for request in seen] == ["GET", "POST"]
+        else:
+            with pytest.raises(AppError) as error:
+                run_probe(path, "probe-fixture-model", allow_live=True, http_transport=transport)
+            assert error.value.code == "NO_CAPABLE_MODEL"
+            assert seen == []
+        assert get_value(conn, "settings") == settings
+        assert path.read_bytes() == original
+    finally:
+        conn.close()
 
 
 def test_mock_probe_is_audited_but_never_live_or_office_qualification(tmp_path, monkeypatch):

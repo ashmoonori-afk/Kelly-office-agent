@@ -5,7 +5,7 @@ import hashlib
 import json
 import threading
 from contextlib import closing, contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -27,6 +27,43 @@ def no_real_credentials(monkeypatch):
 
 def make_runtime(tmp_path, **kwargs):
     return Runtime(config.AppConfig(project_ids=["sales"]), tmp_path / "config.json", **kwargs)
+
+
+def test_daemon_start_tick_shutdown_and_restart_observations_are_durable(tmp_path, monkeypatch):
+    now = datetime(2026, 9, 8, tzinfo=UTC)
+    monkeypatch.setattr("birkin_lite.runtime._clock", lambda: now)
+    runtime = make_runtime(tmp_path)
+
+    async def scenario():
+        nonlocal now
+        await runtime.start()
+        first = runtime._daemon_session_id
+        try:
+            await runtime._submit("scheduler", runtime.scheduler_once)
+            with closing(db.init_db(runtime.db_path)) as conn:
+                active = db.get_value(conn, "daemon_session:" + first)
+                assert active["started_at"] == active["last_tick_at"] == now.isoformat()
+                assert active["stopped_at"] is None
+            now += timedelta(seconds=20)
+        finally:
+            await runtime.stop()
+        with closing(db.init_db(runtime.db_path)) as conn:
+            assert db.get_value(conn, "daemon_session:" + first)["stopped_at"] == now.isoformat()
+        now += timedelta(hours=2)
+        await runtime.start()
+        try:
+            assert runtime._daemon_session_id != first
+            with closing(db.init_db(runtime.db_path)) as conn:
+                second = db.get_value(conn, "daemon_session:" + runtime._daemon_session_id)
+                assert second["started_at"] == now.isoformat()
+                assert conn.execute("SELECT count(*) FROM calls").fetchone()[0] == 0
+                assert conn.execute("SELECT count(*) FROM outbox").fetchone()[0] == 0
+        finally:
+            await runtime.stop()
+        with engine.DaemonLock(runtime.home / "daemon.lock"):
+            pass
+
+    asyncio.run(scenario())
 
 
 @contextmanager
@@ -87,12 +124,13 @@ def qualified_config(tmp_path, monkeypatch):
     tasks = ["planning", "analyze", "semantic_review"]
     cases = []
     for role in ["L", "M", "H"]:
+        role_tasks = {"L": ["analyze"], "M": tasks[:2], "H": tasks}[role]
         for i in range(20):
             cases.append(
                 {
                     "case_id": f"{role}{i}",
                     "role": role,
-                    "task": tasks[i % 3],
+                    "task": role_tasks[i % len(role_tasks)],
                     "request_id": f"fixture-{role}-{i}",
                     "usage": {
                         "input_tokens_total": 10,

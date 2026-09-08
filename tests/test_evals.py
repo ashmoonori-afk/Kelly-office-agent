@@ -156,6 +156,150 @@ def test_live_import_without_required_human_labels_stays_unverified(cases):
     assert group["total_tokens"] == 14
 
 
+def deferred_observation(case, **changes):
+    return observation(case) | {
+        "workload_complete": False,
+        "output_text": "",
+        "output_sha256": evaluation.sha(""),
+        "numbers": {},
+        "units": {},
+        "numeric_locators": {},
+        "facts": [],
+        "coverage": {},
+        "todos": [],
+        "missing_input": True,
+        "outcome": "awaiting_input",
+        "numeric_verified": False,
+        "output_verified": False,
+        "published_output_count": 0,
+        **changes,
+    }
+
+
+def test_correct_deferral_is_separate_from_completed_quality_and_token_denominators(cases):
+    held_case = next(case for case in cases if case.id == "conflict_missing-05")
+    held = deferred_observation(
+        held_case, id="held", execution="live", calls=[call("held-plan", purpose="plan")]
+    )
+    records = evaluation.validate_observations(
+        [observation(cases[40], execution="live", calls=[call()]), held], cases
+    )
+    judgments = evaluation.import_labels(
+        [label(records[0]), label(records[1], adopted=False)], records
+    )
+    checked = evaluation.checks(held_case, records[1])
+    assert checked["decision"]["passed"] and not checked["passed"]
+    result = evaluation.summarize(records, cases, judgments)
+    assert result["completed_workloads"] == result["accepted_tasks"] == 1
+    assert result["expected_deferral_tasks"] == result["correct_deferral_tasks"] == 1
+    assert result["correct_deferral_rate"] == 1 and result["unexpected_deferral_tasks"] == 0
+    assert result["quality_pass_rate"] == 0.5
+    assert result["total_tokens"] == result["tokens_per_accepted_task"] == 28
+    assert result["actual_micro_usd"] == result["cost_per_accepted_task_micro_usd"] == 6
+    assert "all observed tasks" in result["quality_pass_rate_basis"]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"missing_input": False},
+        {"outcome": "MISSING_INPUT"},
+        {"workload_complete": True, "outcome": "succeeded", "missing_input": False},
+        {"published_output_count": None},
+        {"published_output_count": 1},
+        {"output_text": "generated answer", "output_sha256": evaluation.sha("generated answer")},
+        {"output_verified": True},
+        {
+            "numbers": {"invented": "10"},
+            "units": {"invented": "원"},
+            "numeric_locators": {"invented": []},
+        },
+        {"facts": ["unpublished answer claim"]},
+        {"source_verified": False},
+        {"effect_verified": False},
+        {"effects": ["external_write"]},
+    ],
+)
+def test_deferral_requires_observed_waiting_and_no_published_answer(cases, changes):
+    case = next(case for case in cases if case.id == "conflict_missing-05")
+    record = evaluation.validate_observations([deferred_observation(case, **changes)], cases)[0]
+    assert not evaluation.checks(case, record)["decision"]["passed"]
+    assert evaluation.summarize([record], cases, [])["correct_deferral_tasks"] == 0
+
+
+def test_unexpected_deferral_and_old_unobserved_receipt_count_are_not_successes(cases):
+    wrong = evaluation.validate_observations([deferred_observation(cases[40])], cases)[0]
+    result = evaluation.summarize([wrong], cases, [])
+    assert result["unexpected_deferral_tasks"] == 1
+    assert result["correct_deferral_tasks"] == result["expected_deferral_tasks"] == 0
+    assert result["correct_deferral_rate"] is None
+    held_case = next(case for case in cases if case.id == "conflict_missing-05")
+    old = deferred_observation(held_case)
+    del old["published_output_count"]
+    record = evaluation.validate_observations([old], cases)[0]
+    assert record.published_output_count is None
+    assert not evaluation.checks(held_case, record)["decision"]["passed"]
+
+
+def test_adapters_report_waiting_state_keep_detail_and_bind_zero_published_receipts(tmp_path):
+    from birkin_lite import db
+    from birkin_lite.contracts import RunRequest
+    from evals import execute, live
+
+    case = next(case for case in live.load_cases() if case.id == "conflict_missing-05")
+    conn = db.init_db(tmp_path / "state.db")
+    try:
+        run = db.create_run(
+            conn,
+            execute.ACTOR,
+            "ui",
+            "missing-input-fixture",
+            RunRequest(request=case.request, project_id="eval"),
+        )
+        execute.record_failure(conn, run, "MISSING_INPUT")
+        run = db.get_run(conn, run["id"], execute.ACTOR)
+        ledger_path = tmp_path / "cold-ledger.json"
+        observed = execute.observe(case, conn, tmp_path / "files", run, {}, ledger_path, "cold", 1)
+        assert observed.outcome == "awaiting_input" and observed.published_output_count == 0
+        assert (
+            not observed.workload_complete and evaluation.decision_checks(case, observed)["passed"]
+        )
+        ledger = evaluation.read_json(ledger_path)
+        assert ledger["run"]["error_code"] == "MISSING_INPUT"
+        # Synthetic comparison-shaped ledger tests the live annotator without a provider call.
+        ledger.update(
+            evidence_layer="live",
+            live=True,
+            arm="C",
+            cache="cold",
+            environment_hash=observed.environment_hash,
+            published_text="",
+            published_receipts=[],
+            numeric_observation={"numbers": {}, "units": {}, "numeric_locators": {}},
+            latency_ms=1,
+        )
+        execute.write_json(ledger_path, ledger)
+        db.set_value(conn, "comparison_ledger:" + run["id"], evaluation.fingerprint(ledger))
+    finally:
+        conn.close()
+    annotated = live.annotate_ledger(
+        case.id,
+        ledger_path,
+        {
+            "reviewer_id": "synthetic-independent-reviewer",
+            "independent": True,
+            "output_sha256": evaluation.sha(""),
+            "facts": [],
+            "coverage": {},
+            "todo_requirements": {},
+        },
+    )
+    assert annotated.outcome == "awaiting_input" and annotated.published_output_count == 0
+    checked = evaluation.checks(case, annotated)
+    assert checked["decision"]["passed"] and not checked["passed"]
+    assert evaluation.read_json(ledger_path)["run"]["error_code"] == "MISSING_INPUT"
+
+
 def test_failed_tasks_and_failed_repair_calls_remain_in_accepted_denominator_numerator(cases):
     first = observation(
         cases[40],

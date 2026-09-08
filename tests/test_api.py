@@ -8,6 +8,11 @@ from fastapi.testclient import TestClient
 
 from birkin_lite import db, usage
 from birkin_lite.api import create_app
+from birkin_lite.automation import (
+    AutomationConfig,
+    record_daemon_observation,
+    tick_automations,
+)
 from birkin_lite.config import AppConfig, create_config, load_config
 from birkin_lite.contracts import (
     SAFE_MESSAGES,
@@ -15,7 +20,10 @@ from birkin_lite.contracts import (
     Actor,
     ModelBinding,
     ModelRequest,
+    PriceSnapshot,
     RunRequest,
+    TokenRates,
+    Usage,
     canonical_json,
     digest,
 )
@@ -95,10 +103,7 @@ def test_memory_delete_explicit_file_removal_is_scoped(local_api, purge_original
     assert client.get("/api/memories?project_id=sales").json()["memories"] == []
 
 
-def test_actual_call_metadata_is_scoped_and_has_no_prompt_or_private_route(local_api):
-    client, app, path = local_api
-    headers = {**authenticate(client, app), "Idempotency-Key": "visible-model"}
-    run_id = client.post("/api/runs", json=REQUEST, headers=headers).json()["run"]["id"]
+def planner_call_fixture():
     binding = ModelBinding(
         provider="xai",
         model_id="synthetic-model",
@@ -120,6 +125,14 @@ def test_actual_call_metadata_is_scoped_and_has_no_prompt_or_private_route(local
         context="PRIVATE_SYNTHETIC_CONTEXT",
         max_output=100,
     )
+    return binding, request
+
+
+def test_actual_call_metadata_is_scoped_and_has_no_prompt_or_private_route(local_api):
+    client, app, path = local_api
+    headers = {**authenticate(client, app), "Idempotency-Key": "visible-model"}
+    run_id = client.post("/api/runs", json=REQUEST, headers=headers).json()["run"]["id"]
+    binding, request = planner_call_fixture()
     with closing(db.init_db(path.parent / "data" / "state.db")) as conn:
         usage.begin_call(
             conn,
@@ -144,6 +157,8 @@ def test_actual_call_metadata_is_scoped_and_has_no_prompt_or_private_route(local
     assert set(calls[0]) == {
         "id",
         "step_id",
+        "logical_call_no",
+        "transport_attempt_no",
         "provider",
         "model_id",
         "purpose",
@@ -155,8 +170,206 @@ def test_actual_call_metadata_is_scoped_and_has_no_prompt_or_private_route(local
         "output_tokens_total",
         "reasoning_tokens",
         "usage_basis",
+        "actual_micro_usd",
+        "price_stale",
     }
+    assert calls[0]["actual_micro_usd"] is None and calls[0]["price_stale"] is True
+    assert detail.json()["automation_observation"] is None
     assert "PRIVATE_SYNTHETIC_CONTEXT" not in detail.text and "PRIVATE_ROUTE" not in detail.text
+
+
+@pytest.mark.parametrize(
+    "unknown_attempt,unpriced", [(None, False), (1, False), (2, False), (None, True)]
+)
+def test_attempt_costs_preserve_real_retry_groups_unknown_totals_and_scope(
+    local_api, unknown_attempt, unpriced
+):
+    client, app, path = local_api
+    headers = {**authenticate(client, app), "Idempotency-Key": "attempt-costs"}
+    run_id = client.post("/api/runs", json=REQUEST, headers=headers).json()["run"]["id"]
+    binding, request = planner_call_fixture()
+    now = datetime.now(UTC)
+    snapshot = (
+        None
+        if unpriced
+        else PriceSnapshot(
+            rates=TokenRates(input=1000000, output=2000000),
+            cache_write_billing="included",
+            checked_at=now.isoformat(),
+            source_url="https://example.invalid/PRIVATE_PRICE_SOURCE",
+        )
+    )
+    with closing(db.init_db(path.parent / "data" / "state.db")) as conn:
+        previous, expected = None, []
+        for attempt in (1, 2):
+            record = usage.begin_call(
+                conn,
+                run_id,
+                None,
+                binding,
+                request,
+                actor=OWNER,
+                purpose="plan",
+                now=now,
+                price_snapshot=snapshot,
+                retry_of=previous,
+                route={"role": "M", "reason": "PRIVATE_ROUTE"},
+            )
+            usage.start_call(conn, record["id"], OWNER)
+            if attempt == unknown_attempt:
+                usage.mark_usage_unknown(conn, record["id"], "TIMEOUT", actor=OWNER, now=now)
+                expected.append(None)
+            else:
+                settled = usage.settle_call(
+                    conn,
+                    record["id"],
+                    Usage(
+                        input_tokens_total=100 * attempt,
+                        cached_input_tokens=0,
+                        output_tokens_total=10 * attempt,
+                        usage_basis="provider",
+                    ),
+                    {"prompt_tokens": 100 * attempt},
+                    actor=OWNER,
+                    now=now,
+                    request_id="PRIVATE_PROVIDER_REQUEST",
+                    finish_reason="stop",
+                )
+                expected.append(None if unpriced else 120 * attempt)
+                assert settled["actual_micro_usd"] == expected[-1]
+            previous = record["id"]
+        released = usage.begin_call(
+            conn,
+            run_id,
+            None,
+            binding,
+            request,
+            actor=OWNER,
+            purpose="plan",
+            now=now,
+            price_snapshot=snapshot,
+            route={"repair_errors": ["PLAN_INVALID"]},
+        )
+        usage.release_call(conn, released["id"], actor=OWNER, now=now)
+        other = Actor(id="another-owner", project_ids=["sales"])
+        hidden = db.create_run(conn, other, "ui", "hidden-cost", RunRequest(**REQUEST))
+        usage.begin_call(
+            conn,
+            hidden["id"],
+            None,
+            binding,
+            request,
+            actor=other,
+            purpose="plan",
+            now=now,
+            price_snapshot=snapshot,
+        )
+    response = client.get("/api/runs/" + run_id)
+    assert response.status_code == 200
+    detail = response.json()
+    calls = detail["calls"]
+    assert [row["logical_call_no"] for row in calls] == [1, 1, 2]
+    assert [row["transport_attempt_no"] for row in calls] == [1, 2, 3]
+    assert [row["actual_micro_usd"] for row in calls] == [*expected, None]
+    assert [row["price_stale"] for row in calls] == [unpriced] * 3
+    assert calls[-1]["state"] == "released"
+    total = None if any(value is None for value in expected) else sum(expected)
+    assert detail["usage"]["actual_micro_usd"] == total
+    assert detail["usage"]["by_step"]["planning"]["actual_micro_usd"] == total
+    assert detail["usage"]["known_actual_micro_usd"] == sum(
+        value for value in expected if value is not None
+    )
+    assert detail["usage"]["released_calls"] == 1
+    assert detail["usage"]["unknown_calls"] == int(unknown_attempt is not None)
+    assert detail["usage"]["usage_state"] == ("unknown" if unknown_attempt else "provider")
+    assert "PRIVATE_" not in response.text and hidden["id"] not in response.text
+    error(client.get("/api/runs/" + hidden["id"]), 404)
+
+
+@pytest.mark.parametrize(
+    "delay,changed",
+    [
+        (0, None),
+        (1, None),
+        (0, "schema_version"),
+        (0, "actor_id"),
+        (0, "project_id"),
+        (0, "automation_id"),
+        (0, "event_key"),
+        (0, "missing"),
+    ],
+)
+def test_run_observation_uses_its_scoped_event_and_safe_snapshot(local_api, delay, changed):
+    client, app, path = local_api
+    authenticate(client, app)
+    start = datetime(2026, 9, 8, tzinfo=UTC)
+    scheduled = start + timedelta(minutes=5)
+    with closing(db.init_db(path.parent / "data" / "state.db")) as conn:
+        bot = db.create_automation(
+            conn,
+            OWNER,
+            AutomationConfig(
+                name="관측 검사",
+                project_id="sales",
+                recipe="summarize",
+                instruction="합성 업무",
+                trigger={"kind": "once", "at": scheduled.isoformat()},
+            ),
+            now=start,
+        )
+        db.set_automation_enabled(
+            conn,
+            bot["id"],
+            bot["revision"],
+            True,
+            OWNER,
+            confirmed_hash=db.automation_proposal_hash(bot),
+            now=start,
+        )
+        record_daemon_observation(conn, OWNER, "PRIVATE_SESSION", "start", start)
+        run = tick_automations(
+            conn,
+            path.parent / "data",
+            OWNER,
+            scheduled + timedelta(seconds=delay),
+            daemon_session_id="PRIVATE_SESSION",
+        )[0]
+        event = conn.execute(
+            "SELECT event_key FROM inbox_events WHERE run_id=?", (run["id"],)
+        ).fetchone()
+        key = "automation_observation:" + bot["id"] + ":" + event["event_key"]
+        snapshot = db.get_value(conn, key)
+        snapshot["private_context"] = "PRIVATE_EXTRA"
+        if changed == "missing":
+            snapshot = None
+        elif changed:
+            snapshot[changed] = "PRIVATE_WRONG_SCOPE"
+        db.set_value(conn, key, snapshot)
+    response = client.get("/api/runs/" + run["id"])
+    assert response.status_code == 200
+    observation = response.json()["automation_observation"]
+    if changed:
+        assert observation is None
+    else:
+        assert observation == {
+            name: snapshot[name]
+            for name in (
+                "schema_version",
+                "scheduled_utc",
+                "event_received_at",
+                "started_at",
+                "previous_tick_at",
+                "tick_at",
+                "observed_at",
+                "clock_rollback",
+                "scheduled_daemon_state",
+                "pc_power_state",
+            )
+        }
+        assert observation["scheduled_daemon_state"] == ("unknown" if delay else "observed")
+        assert observation["pc_power_state"] == "unknown"
+        assert observation["scheduled_utc"] == scheduled.isoformat()
+    assert "PRIVATE_" not in response.text
 
 
 def test_bootstrap_sets_private_cookie_and_consumes_code_once(local_api):

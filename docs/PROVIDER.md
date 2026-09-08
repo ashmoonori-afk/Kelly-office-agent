@@ -18,7 +18,9 @@ HTTP 오류·거절·잘못된 JSON 내용·출력 잘림·계약 불일치도 �
 
 ## 합성 연결 검사 실행
 
-키는 실행 프로세스의 `XAI_API_KEY` 환경변수를 우선 읽고, 없을 때 설정 화면에서 저장한 현재 Windows 사용자 DPAPI 저장소를 읽는다. `config.example.json`을 별도 설정 파일로 복사하고 실제 계정의 모델 ID, `enabled:true`, 허용 프로젝트, `M` 역할, `structured_output`·`planning` 기능을 설정한 뒤 다음 명령을 실행한다. 예제의 모델 ID는 실제 가용 모델을 뜻하지 않으며 기본값은 비활성 상태다.
+키는 실행 프로세스의 `XAI_API_KEY` 환경변수를 우선 읽고, 없을 때 설정 화면에서 저장한 현재 Windows 사용자 DPAPI 저장소를 읽는다. 연결 검사도 서버와 같은 `runtime_config`로 파일 설정에 UI의 DB 설정을 반영한다. `state.db`는 기존 보호된 읽기 전용 연결로 읽으며, UI에서 추가·활성화하거나 비활성화한 모델 상태를 그대로 사용한다. UI 설정이 없으면 파일 설정을 사용한다.
+
+설정 화면에서 모델을 준비하거나 `config.example.json`을 별도 설정 파일로 복사한다. 실제 계정의 모델 ID, `enabled:true`, 허용 프로젝트, `M` 역할, `structured_output`·`planning` 기능을 설정한 뒤 다음 명령을 실행한다. 예제의 모델 ID는 실제 가용 모델을 뜻하지 않으며 기본값은 비활성 상태다.
 
 ```powershell
 .\.venv\Scripts\python.exe -m birkin_lite.live_smoke --config .\config.json --model YOUR_ACCOUNT_MODEL_ID --allow-live
@@ -29,3 +31,5 @@ HTTP 오류·거절·잘못된 JSON 내용·출력 잘림·계약 불일치도 �
 입력은 프로그램에 고정한 합성 문장뿐이다. `PlanningResultV1` 검증을 통과하고 TODO가 정확히 하나이며 제목이 `LIVE_MODEL_OK`와 일치할 때만 `accepted:true`로 기록한다. 생성한 계획을 설치하거나 실행하지 않는다. 성공 여부와 별개로 받은 사용량은 `<home>/evidence/provider-probe.db`의 호출 원장에 남기고, 실패 응답에서 사용량을 관측하지 못하면 null과 unknown을 보존한다.
 
 결과 JSON은 `<home>/evidence/provider-live-<run_id>.json`에 새 파일로 저장된다. 테스트에서 `http_transport`를 주입하면 파일 이름은 `provider-mock-<run_id>.json`이며 결과와 증거의 `live`는 항상 false다. 모든 연결 검사 결과의 `qualified_for_office`는 false이며, 연결 성공으로 모델 품질 자격이나 Office 실제 실행 성공을 인정하지 않는다. 현재 증거는 `tests/test_live_smoke.py`의 모의 HTTP 계약 검증이며 실제 계정 호출은 아직 수행하지 않았다.
+
+정상 업무의 품질 자격은 별도 실측 보고서가 필요하다. 선언한 역할마다 서로 다른 fixture 20개 이상, 필수 schema·숫자·출처·권한 검사 통과, 실제 provider 사용량과 기존 H 기준 채택 비교를 유지한다. 역할별 업무 범위는 계획이 M/H, 의미 검토가 H이며, 요약·보고서 서술·회의 행동 추출·답신 초안·검색 답변·분석은 선언한 L/M/H 역할마다 검사한다. L의 계획이나 L/M의 의미 검토를 실측했다는 보고서는 거부한다. 연결 검사 한 건은 이 자격 요건을 충족하지 않는다.

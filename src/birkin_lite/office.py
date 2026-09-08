@@ -9,6 +9,7 @@ import zipfile
 from datetime import date, datetime
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote as urlquote
 
 from pydantic import Field, model_validator
@@ -47,6 +48,7 @@ class AggregatePolicy(StrictModel):
     mixed_policy: str = "error"
     include_hidden_rows: bool = False
     delimiter: str = ","
+    thousands_separator: Literal[","] | None = None
     ratio: Ratio | None = None
 
     @model_validator(mode="after")
@@ -335,11 +337,17 @@ def _locate_worker(path, args):
     raise AppError("NOT_FOUND")
 
 
-def _number(value):
+def _number(value, *, thousands_separator=None):
     if isinstance(value, (bool, date, datetime)):
         return None
     text = _display(value).strip()
-    if len(text) > 128 or not re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", text):
+    if len(text) > 128:
+        return None
+    if thousands_separator == "," and re.fullmatch(
+        r"[+-]?[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]*)?", text
+    ):
+        text = text.replace(",", "")
+    if not re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", text):
         return None
     try:
         number = Decimal(text)
@@ -449,11 +457,11 @@ def _aggregate_worker(path, args):
                     if policy.blank_policy == "error":
                         raise AppError("MISSING_INPUT")
                     continue
-                numeric = _number(value)
+                numeric = _number(value, thousands_separator=policy.thousands_separator)
                 if numeric is None:
                     stat["invalid"] += 1
                     if policy.mixed_policy == "error":
-                        raise AppError("INVALID_INPUT")
+                        raise AppError("MISSING_INPUT")
                     continue
                 stat["count"] += 1
                 stat["sum"] += numeric

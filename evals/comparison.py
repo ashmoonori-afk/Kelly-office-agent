@@ -4,12 +4,22 @@ import hashlib
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
+from time import perf_counter
 
 from birkin_lite import artifacts, db, engine, planning, tools, usage, verification
 from birkin_lite.contracts import AppError, ModelBinding, ModelResult, RunRequest
 from birkin_lite.providers import TransportError, metered_complete
 
-from .execute import ACTOR, STOP_STATES, reopened_output, rows, source_bytes, task_spec, write_json
+from .execute import (
+    ACTOR,
+    STOP_STATES,
+    numeric_observation,
+    reopened_output,
+    rows,
+    source_bytes,
+    task_spec,
+    write_json,
+)
 from .run import condition_hash, fingerprint, read_json
 
 ARMS = ("A", "B", "C")
@@ -48,6 +58,10 @@ def _environment(case, catalog, privacy, inputs):
     return fingerprint(
         {
             "adapter": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            "observation_code": {
+                name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+                for name in ("execute.py", "run.py")
+            },
             "product": {
                 path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in sorted(source.glob("*.py"))
@@ -63,7 +77,21 @@ def _environment(case, catalog, privacy, inputs):
     )
 
 
-def _run(case, directory, arm, transport, catalog, privacy, frozen, environment, cache):
+def _run(
+    case,
+    directory,
+    arm,
+    transport,
+    catalog,
+    privacy,
+    frozen,
+    environment,
+    cache,
+    *,
+    evidence_layer="offline_fixture",
+    prices=None,
+):
+    started = perf_counter()
     if cache == "cold":
         directory.mkdir()
     elif not (directory / "cold-ledger.json").is_file():
@@ -110,6 +138,16 @@ def _run(case, directory, arm, transport, catalog, privacy, frozen, environment,
             run = db.supply_inputs(
                 conn, run["id"], ACTOR, task_spec(case, request.artifact_ids), run["revision"]
             )
+
+            def planning_complete(request, binding, context):
+                return metered_complete(
+                    request,
+                    binding,
+                    context,
+                    transport=transport,
+                    price_snapshot=prices(binding) if prices else None,
+                )
+
             run = planning.prepare_run(
                 conn,
                 home,
@@ -118,7 +156,7 @@ def _run(case, directory, arm, transport, catalog, privacy, frozen, environment,
                 tools=registered,
                 capability_catalog=catalog,
                 privacy_policy=privacy,
-                complete=partial(metered_complete, transport=transport),
+                complete=planning_complete,
             )
             complete = partial(
                 engine.complete_model_todo,
@@ -126,6 +164,7 @@ def _run(case, directory, arm, transport, catalog, privacy, frozen, environment,
                 privacy_policy=privacy,
                 transport=transport,
                 evaluation_arm=arm if arm != "C" else None,
+                price_snapshot=prices,
             )
             # Eight TODOs can each need one verification repair; core call caps still apply.
             for _ in range(17):
@@ -168,8 +207,10 @@ def _run(case, directory, arm, transport, catalog, privacy, frozen, environment,
                     "unchanged": original_hash == managed_hash == record["sha256"],
                 }
             )
+        measured = usage.summarize_usage(conn, run["id"], ACTOR)
+        numbers, units, locators = numeric_observation(case, source_map, steps)
         ledger = {
-            "evidence_layer": "offline_fixture",
+            "evidence_layer": evidence_layer,
             "case_id": case.id,
             "arm": arm,
             "cache": cache,
@@ -182,14 +223,27 @@ def _run(case, directory, arm, transport, catalog, privacy, frozen, environment,
             "sources": source_proofs,
             "published_text": output,
             "published_receipts": receipts,
-            "fixture_usage": usage.summarize_usage(conn, run["id"], ACTOR),
-            "fixture_replies_used": transport.used,
-            "live": False,
-            "actual_provider_tokens": None,
+            "usage": measured,
+            "cache_observation": db.get_value(
+                conn, "cache_observation:" + run["id"], {"lookups": 0, "hits": 0}
+            ),
+            "numeric_observation": {
+                "numbers": numbers,
+                "units": units,
+                "numeric_locators": locators,
+            },
+            "latency_ms": round((perf_counter() - started) * 1000),
+            "live": evidence_layer == "live",
+            "actual_provider_tokens": measured["total_tokens"]
+            if evidence_layer == "live" and measured["usage_state"] in {"provider", "not_used"}
+            else None,
             "model_quality": None,
             "token_reduction": None,
             "comparison_limit": LIMIT_NOTE,
         }
+        if evidence_layer == "offline_fixture":
+            ledger.update(fixture_usage=measured, fixture_replies_used=transport.used)
+        db.set_value(conn, "comparison_ledger:" + run["id"], fingerprint(ledger))
         write_json(destination, ledger)
         return ledger
     finally:

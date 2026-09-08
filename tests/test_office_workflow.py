@@ -138,7 +138,7 @@ def test_w01_real_100000_rows_to_xlsx_and_receipt_without_models(tmp_path):
         book = load_workbook(handle, read_only=True)
         values = list(book.active.values)
         book.close()
-    assert values[0] == ("그룹", "금액")
+    assert values[0] == ("그룹", "금액 (KRW)")
     assert {row[0]: Decimal(str(row[1])) for row in values[1:]} == {
         "영업": Decimal("5000.00"),
         "지원": Decimal("10000.00"),
@@ -200,8 +200,9 @@ def test_tool_arguments_rejected_before_partial_execution(tmp_path):
     conn.close()
 
 
-def test_missing_required_numeric_value_waits_without_publishing(tmp_path):
-    conn, home, source, run = setup(tmp_path, "부서,금액\n영업,\n".encode())
+@pytest.mark.parametrize("value", ["", "확인 필요"])
+def test_missing_required_numeric_value_waits_without_publishing(tmp_path, value):
+    conn, home, source, run = setup(tmp_path, f"부서,금액\n영업,{value}\n".encode())
     plan = workflow(source["id"])
     plan.todos[0].executor.args["policy"]["blank_policy"] = "error"
     tools = registry(home)

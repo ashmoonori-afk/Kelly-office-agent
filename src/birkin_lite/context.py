@@ -440,3 +440,19 @@ def cache_get(conn, home, actor, project_id, key, *, source_versions, now=None):
         raise AppError("POLICY_DENIED")
     _revalidate(conn, home, actor, project_id, source_versions, now=now)
     return cached["value"]
+
+
+def record_cache_lookup(conn, run_id, *, hit):
+    """Count completed cache checks and actually reused values, atomically per run."""
+    conn.execute(
+        "INSERT INTO kv VALUES (?,?,1,?) ON CONFLICT(key) DO UPDATE SET "
+        "value_json=json_set(kv.value_json,'$.lookups',"
+        "json_extract(kv.value_json,'$.lookups')+1,'$.hits',"
+        "json_extract(kv.value_json,'$.hits')+json_extract(excluded.value_json,'$.hits')),"
+        "revision=kv.revision+1,updated_at=excluded.updated_at",
+        (
+            "cache_observation:" + run_id,
+            canonical_json({"lookups": 1, "hits": int(hit)}),
+            utc_now(),
+        ),
+    )

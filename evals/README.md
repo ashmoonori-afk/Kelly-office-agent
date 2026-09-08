@@ -1,6 +1,6 @@
 # 고정 합성 평가셋과 평가 준비 도구
 
-**현재 상태: P12 일부 구현.** 100개 Office 사례를 선택 실행하는 C 오프라인 실행기, 20개 자동화 사건 실행기, 합성 응답으로 A/B/C 실행 경계를 비교하는 도구를 연결했다. 자동화 사건은 v1.1에서 20/20 일치했고 Office는 대표 사례만 실행했다. 전체 corpus의 실제 모델 평가와 사람 채택 판정은 미완료다. validate 성공은 gold 구조 검사이며 모델의 정답률이 아니다. 모델 품질과 토큰 절감률은 null이다. 네트워크·실제 Telegram 전송·Office 앱 실행은 이 평가 도구에 포함되지 않는다.
+**현재 상태: 실제 모델 품질 평가는 미완료.** C 오프라인 Office 실행기, 자동화 20개 사건 실행기, 합성 A/B/C 비교, 별도 승인을 요구하는 실제 모델 비교 실행기를 제공한다. 모의 HTTP와 실제 공급자 증거를 구분한다. validate 성공은 gold 구조 검사이며 모델의 정답률이 아니다. 사람 채택 판정과 실제 평가가 없으므로 모델 품질·토큰 절감률은 미확정이다. 실제 Telegram 전송과 Office 앱 화면 검사는 별도다.
 
 새 의존성은 없다. 기존 Pydantic 엄격 모델을 재사용하고 JSON·Decimal·통계 집계·CLI는 표준 라이브러리로 구현했다. 평가 파일은 배포 wheel의 실행 기능이 아니다.
 
@@ -48,7 +48,7 @@ manifest는 120×3경로×cold/warm = 720개 **예정 조합**을 출력한다. 
 
 각 사례 디렉터리에는 원본 파일, 관리 사본, state.db, cold/warm-ledger.json, cold/warm-observation.json이 남는다. 실제 prepare_run/execute_next·도구·검증기를 사용하고, 결과는 발행된 artifact와 일치하는 Receipt가 있을 때만 실제 파일을 재열어 읽는다. 원본과 관리 사본의 SHA-256도 다시 확인한다. warm은 동일 source ID·원본 바이트·코드·환경을 재사용한다. 원장을 보존한 채 새 run을 만든다.
 
-현재 adapter는 실제 집계 숫자·단위·원장 locator, TODO kind/상태, 권한 effect, 파일 재열기·원본 불변을 관측한다. gold의 의미상 요구와 제품 requirement ID의 대응은 자동 확정하지 않으므로 facts/coverage 및 관측 TODO의 gold requirement_ids는 비워 두고 실제 연결은 원장에 보존한다. 따라서 이 파일을 scorer에 넣은 coverage·불필요 TODO 지표는 **미주석 관측**으로 해석해야 하며 제품 품질 판정에 사용하면 안 된다. 다음 단계는 원본 결과에 대한 독립 의미 주석 또는 검증 가능한 숫자 요구 대응이다. 캐시 lookup 계측도 미연결이므로 0건 관측을 기록하고 hit rate는 null이다.
+현재 adapter는 실제 집계 숫자·단위·원장 locator, TODO kind/상태, 권한 effect, 파일 재열기·원본 불변을 관측한다. gold의 의미상 요구와 제품 requirement ID의 대응은 자동 확정하지 않으므로 facts/coverage 및 관측 TODO의 gold requirement_ids는 비워 두고 실제 연결은 원장에 보존한다. 따라서 이 파일을 scorer에 넣은 coverage·불필요 TODO 지표는 **미주석 관측**으로 해석해야 하며 제품 품질 판정에 사용하면 안 된다. 다음 단계는 원본 결과에 대한 독립 의미 주석 또는 검증 가능한 숫자 요구 대응이다. 캐시는 제품이 완료한 조회와 실제 재사용 횟수를 run별로 기록한다. 조회를 생략한 검토 경로는 조회수에 넣지 않으며, 조회가 없으면 hit rate는 null이다.
 
 회귀 검사는 원문 table-01의 실제 CSV→D→XLSX 재열기, summary-01/conflict_missing-05의 실제 모델 부족 중단, 별도로 명명한 짧은 자료 미첨부 fixture의 awaiting_input을 구분한다. 짧은 fixture를 고정 사례의 성공으로 바꿔 보고하지 않는다. XLSX를 A/B까지 확장할 때는 각 경로에서 ZIP 바이트를 재생성하지 않고 한 번 고정한 원본 바이트를 재사용해야 한다.
 
@@ -101,6 +101,7 @@ execution=offline_fixture는 합성 관측 자체를 검사한 경우다. 향후
 ## 집계 정의
 
 - 분모는 해당 arm/cache/범주 또는 cohort의 전체 관측 업무다. 실패·미채택 업무와 실패 호출의 입력+출력 토큰 및 과금도 분자에 남긴다.
+- 입력 보완이 정답인 사례는 `decision`에서 따로 평가한다. `expected_deferral_tasks`, `correct_deferral_tasks`, `correct_deferral_rate`, `unexpected_deferral_tasks`와 `completed_workloads`를 구분한다. 실제 `awaiting_input`, 검증된 원본·허용 영향, 발행 영수증 0개, 숫자·답변 출력 없음이 확인돼야 올바른 보류다. `published_output_count=null`인 이전 관측은 출력 0개로 추정하지 않는다. 보류를 완료·사람 채택으로 올리지 않으며 기존 품질률은 전체 관측 중 채택된 완료 산출물의 비율이다.
 - 총 토큰은 input_tokens_total + output_tokens_total이다. cached input과 reasoning은 각각 입력/출력의 부분집합이므로 한 번 더 더하지 않는다. cached input과 reasoning은 별도 열로 보인다. 공급자별 캐시 요율은 실제 금액 원장에 반영되어야 한다.
 - 일부 사용량이나 가격이 미상이면 합계·채택당 수치를 null로 유지한다. known_*_lower_bound는 확인된 부분만의 하한이며 0원 견적이 아니다. stale 가격도 정확한 비용 비교에서 제외한다.
 - planning_tokens는 plan/replan 전체 호출, repair_rate는 repair 호출이 있는 업무 비율, escalation_rate는 실제 상향 호출이 있는 업무 비율이다.
@@ -116,10 +117,10 @@ execution=offline_fixture는 합성 관측 자체를 검사한 경우다. 향후
 2. 구현됨: C 오프라인 planning.prepare_run → engine.execute_next와 현재 tools.registry/verification.registry를 연결한다. 모델이 필요한 업무는 중단하고 실제 상태를 남긴다. 전체 100개 일괄 검증은 아직 수행하지 않았고 대표 사례를 검증했다.
 3. `comparison.py`는 같은 파일·DB·도구·검증기를 A/B/C로 실행하는 오프라인 비교 경계를 제공한다. 외부 모델 대신 명시적인 합성 응답만 받으며, 품질·공급자 토큰·절감률은 null이다. 제품의 기본 경로는 그대로 C이고 평가용 입력은 HTTP/config에 노출하지 않는다. 전체 corpus 실측 연결은 별도다.
 4. `automation.py`는 20개 봇 사건을 실제 DB·주입 시계·허용된 파일·명시적인 HTTP mock에 연결한다. `python -m evals.automation --case all --workspace <새 폴더>`로 실행한다. C/cold 상태 평가이며 Office 내용 생성·실제 Telegram 전달을 확인하는 실행은 아니다.
-5. 부분 구현: 실제 calls·steps·receipt·출력 hash에서 Observation을 만든다. 원장과 원본 불변, 실제 결과 재열기는 연결했고, gold 의미 요구와의 독립 대응·분류 주석 및 캐시 계측은 남아 있다.
+5. 실제 calls·steps·receipt·출력 hash와 캐시 계측을 연결했다. 실제 모델 결과의 의미상 facts·coverage·TODO 요구 연결은 독립 주석을 받아야 Observation으로 발행한다.
 6. 명시적으로 승인된 모델·횟수·합성 범위에서 live 평가를 실행하고 사람이 blinded packet을 채택한다. 현재 승인 범위를 120건 평가나 A/B/C 전체 실행 허가로 확대하지 않는다.
 
-현재 run.py는 네트워크 API 클라이언트나 live 실행 명령을 제공하지 않는다. P12 전체 완료, 모델 품질, 토큰 절감, 실제 Telegram 전달 또는 Office 앱 열기 성공은 이 파일들만으로 주장할 수 없다.
+run.py는 scorer이며 실제 호출은 별도 live.py에서만 명시적으로 실행한다. 기존 관측과의 호환을 위해 고정 PROTOCOL의 최초 실행기 상태 값은 유지한다. 현재 실행기 사용 가능 여부는 이 문서와 실제 CLI를 따른다. P12 전체 완료, 모델 품질, 토큰 절감, 실제 Telegram 전달 또는 Office 앱 열기 성공은 코드와 모의 시험만으로 주장할 수 없다.
 
 ### A/B 선택 경계
 
@@ -127,10 +128,76 @@ execution=offline_fixture는 합성 관측 자체를 검사한 경우다. 향후
 
 관측 adapter는 calls의 route_json에서 실제 역할과 reasoning을 읽고, steps.spec_json에서는 의미상 kind와 requirement 연결을 읽는다. A/B를 실행하기 위해 저장된 kind를 바꾸거나 결과/검증기를 교체하면 안 된다. B의 후속 시도 역시 현재 동일 TODO 논리 호출 상한과 필수 H review 한도를 넘을 수 없으므로, M/H 전체 cascade가 항상 가능하다고 가정하지 않는다.
 
-`compare_fixture(case, directory, scripts=..., catalog=..., privacy=..., cache="cold")`는 A/B/C 각각의 유한한 `ModelResult` 목록을 받는다. `provider="fixture"`, `metering_mode="local"`만 허용하며 fixture 사용량은 `estimated` 또는 `unknown`이어야 한다. 실제 공급자 사용량을 가장한 fixture와 외부 transport callable은 거부한다. 별도 live CLI는 없다. 각 arm은 고립된 SQLite/home을 사용하고 입력 파일 바이트는 한 번만 고정한다. warm은 같은 arm의 DB·원본·환경을 재사용하며 cold 원장을 남긴다.
+`compare_fixture(case, directory, scripts=..., catalog=..., privacy=..., cache="cold")`는 A/B/C 각각의 유한한 `ModelResult` 목록을 받는다. `provider="fixture"`, `metering_mode="local"`만 허용하며 fixture 사용량은 `estimated` 또는 `unknown`이어야 한다. 실제 공급자 사용량을 가장한 fixture와 외부 transport callable은 거부한다. 각 arm은 고립된 SQLite/home을 사용하고 입력 파일 바이트는 한 번만 고정한다. warm은 같은 arm의 DB·원본·환경을 재사용하며 cold 원장을 남긴다.
 
 B는 내용 생성 L에서 실제 검증 실패 후 M으로 이동할 수 있다. HTTP 429 재시도는 같은 L 논리 호출이고 승격이 아니다. 필수 H 검토도 TODO의 두 번 한도에 포함되므로 세 번째 생성/검토는 `CALL_LIMIT`으로 중단한다. 고정된 arm을 중간에 바꾸거나 평가 snapshot 없이 역할을 낮추는 호출은 거부한다. ledger는 실제 run/steps/calls/재열기 결과를 기록하되 `offline_fixture`이며, scorer용 품질 `Observation`으로 자동 변환하지 않는다.
 
+
+## 최초 모델 후보 시험과 자격 자료
+
+`evals.qualification`은 일반 업무 라우터에 미검증 모델을 등록하지 않고 격리된 후보 시험을 실행한다. 전용 설정은 `actor_id: "eval-owner"`, `project_ids: ["eval"]`과 해당 프로젝트의 xAI cloud 허용 정책을 사용한다. 후보와 기준 H 모델은 실제 계정 ID·기능·역할·context/output 한도·reasoning 옵션을 명시하고 `enabled: true`, `allowed_projects: ["eval"]`, `metering_mode: "api"`로 설정한다. 최초 시험에는 quality evidence ID가 필요하지 않다. 실행 키는 일반 앱과 같은 환경변수 또는 보호 저장소에서 읽는다.
+
+~~~powershell
+python -m evals.qualification prepare --config eval-config.json --model candidate-model-id --role M --task summarize --case summary-01 --workspace .birkin-lite/evals/candidate-summary
+~~~
+
+준비는 키·외부 클라이언트·출력 디렉터리를 만들지 않고 `{manifest, manifest_sha256}`을 stdout에 출력한다. 그 전체 JSON을 BOM 없는 UTF-8 `candidate-manifest.json`으로 저장하고 내용을 검토한다. `--case`는 반복할 수 있으며 선택 사례마다 생성 1회가 상한이다. 모델 목록 조회 1회는 생성과 별개다. **아래 실행에는 그 시험 범위의 별도 승인이 필요하다.**
+
+~~~powershell
+python -m evals.qualification execute --manifest candidate-manifest.json --manifest-sha256 REVIEWED_SHA256 --allow-live
+~~~
+
+자동 재시도·기존 디렉터리 재실행은 거부한다. 선언한 옵션은 `--reasoning-effort`로 별도 시험한다. H의 `semantic_review`는 `--review-inputs` 파일에 `{case_id: 검토할 내용 출력}`을 지정한다. 후보와 독립 H 기준은 실제 지시문·원문·출력 스키마·검토 대상이 같아야 한다. 코드 버전이 다른 시험을 섞을 수 없다.
+
+각 시험의 `blind.json`은 모델·역할을 숨기고 실제 과제·원래 요청·자료·결과를 보여 준다. 독립 검토자가 기존 HumanLabel 형식으로 채택 여부를 기록한 뒤 발행한다.
+
+~~~powershell
+python -m evals.qualification write --candidate .birkin-lite/evals/candidate-summary --reference .birkin-lite/evals/reference-summary --labels human-labels.json --output .birkin-lite/qualification --evidence-id candidate-v1
+~~~
+
+위 1건 예시는 자격 발행에 부족하다. 선언 역할마다 서로 다른 원본 fixture 20개 이상, 업무·reasoning 옵션 coverage, 필수 검사, 실제 사용량, H 대비 채택 기준을 충족해야 한다. `--candidate`와 `--reference`는 반복할 수 있고 동일 입력의 독립 H 기준이 하나여야 한다. 모의 HTTP·미상 사용량·누락 또는 재사용한 기준·오래된 라벨·변조된 원장/파일은 거부한다.
+
+발행은 `evaluations/<id>.json`, `<id>.provenance.json`, `<id>.profile.json`을 생성하며 일반 설정을 자동 수정하지 않는다. 6개 내용 업무는 고정 텍스트/CSV corpus에 명시적인 역할 시험 지시문을 적용한다. 이 시험을 원래 120건 Office A/B/C 점수로 사용하지 않는다. XLSX 후보 시험은 지원하지 않으며, XLSX의 실제 업무 비교는 다음 실행기를 사용한다.
+
+## 별도 승인 후 실제 A/B/C 실행
+
+`evals.live`는 `eval` 프로젝트에 cloud 사용이 허용되고, 품질 근거가 검증된 xAI 모델만 받는다. 선택한 모델들이 L/M/H 역할을 모두 제공해야 하며 한 모델이 여러 역할을 맡으면 한 번만 지정한다. 준비 명령은 키를 읽거나 외부 호출을 하지 않는다.
+
+~~~powershell
+python -m evals.live prepare --config eval-config.json --case summary-01 --model MODEL_L --model MODEL_M --model MODEL_H --output .birkin-lite/live-evaluation --manifest reviewed.json
+~~~
+
+기본 범위는 A/B/C × cold/warm이다. `--arm C --cold-only --max-http-attempts 16`으로 줄일 수 있다. manifest의 사례·고정 원본 바이트·모델·설정·코드·개인정보 정책·호출 상한·출력 위치를 검토한다. **합성 연결 검사 1건의 승인은 이 일괄 평가 승인이 아니다.** 별도 승인 후 준비 명령이 출력한 SHA256을 사용한다.
+
+~~~powershell
+python -m evals.live run --config eval-config.json --manifest reviewed.json --manifest-sha256 REVIEWED_SHA256 --allow-live
+~~~
+
+원장에는 실제 사용량·비용·캐시 관측·재열기 영수증이 남는다. 같은 디렉터리의 재실행·중단 후 재개는 거부한다. 자료나 코드가 바뀌면 warm 실행도 거부한다. HTTP mock을 주입한 실행은 mock으로 남고 품질 증거로 발행할 수 없다.
+
+독립 검토자는 실제 출력의 SHA256에 맞춘 주석을 작성한다. `coverage`는 확인한 assertion ID에서 source locator 목록으로, `todo_requirements`는 실제 TODO ID에서 assertion ID 목록으로 연결한다. 모든 실제 TODO를 포함하고 gold 답을 자동 복사하지 않는다.
+
+~~~json
+{
+  "reviewer_id": "independent-reviewer",
+  "independent": true,
+  "output_sha256": "ACTUAL_PUBLISHED_TEXT_SHA256",
+  "facts": [],
+  "coverage": {},
+  "todo_requirements": {"ACTUAL_TODO_ID": []},
+  "numbers": {"응답": "40"},
+  "units": {"응답": "명"},
+  "numeric_locators": {"응답": ["s1:L1"]}
+}
+~~~
+
+~~~powershell
+python -m evals.live annotate --case summary-01 --ledger .birkin-lite/live-evaluation/summary-01/C/cold-ledger.json --annotation annotation.json
+~~~
+
+이 명령은 원장 해시와 실제 결과 파일을 다시 확인하고 `cold-ledger-annotation.json`에 주석과 Observation을 함께 저장한다. 채택 여부를 대신 판단하지 않는다. Observation 배열과 별도의 blinded 사람 라벨을 앞의 `evals.run` scorer에 전달한다.
+
+숫자 주석 세 필드는 모델 내용에 원문 숫자를 인용한 경우에만 함께 지정한다. 위 `40명`은 형식 예시이며 실제 출력과 검증된 인용 원문에 같은 수치·단위가 있어야 한다. 위치가 중복되거나 모호하면 거부한다. 결정적 집계의 숫자를 주석으로 덮어쓰거나 원문에 없는 계산값을 추가할 수 없다.
 
 ## 2026-09-08 오류 명칭 정정: corpus/protocol v1.1
 

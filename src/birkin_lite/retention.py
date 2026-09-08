@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 
@@ -31,7 +32,21 @@ def pin_artifact(conn, artifact_id, actor, project_id, pinned):
     return value
 
 
-def _own_key(key, value, run_id, identifiers):
+def _own_key(key, value, run, identifiers):
+    run_id = run["id"]
+    if (
+        run["automation_id"] is not None
+        and key == "automation_plan:" + run["automation_id"]
+        and isinstance(value, dict)
+        and set(value) == {"scope", "sources", "run_id"}
+        and value["run_id"] == run_id
+        and all(
+            isinstance(value[name], str) and re.fullmatch(r"[a-f0-9]{64}", value[name])
+            for name in ("scope", "sources")
+        )
+    ):
+        # This derived pointer cannot pin the completed plan and result payload forever.
+        return True
     return key in {
         "task_spec:" + run_id,
         "confirmed_sources:" + run_id,
@@ -73,7 +88,7 @@ def _protected(conn, run, identifiers):
             return True
     for row in conn.execute("SELECT key,value_json FROM kv"):
         key, value = row["key"], json.loads(row["value_json"])
-        if key.startswith(("cache:", "retention:")) or _own_key(key, value, run["id"], identifiers):
+        if key.startswith(("cache:", "retention:")) or _own_key(key, value, run, identifiers):
             continue
         if key.startswith("artifact_pin:") and value.get("pinned") is not True:
             continue
@@ -103,7 +118,7 @@ def _archive(conn, run, rows, now):
         )
     for row in list(conn.execute("SELECT key,value_json FROM kv")):
         value = json.loads(row["value_json"])
-        if _own_key(row["key"], value, run["id"], identifiers) or (
+        if _own_key(row["key"], value, run, identifiers) or (
             row["key"].startswith("cache:") and _references(value, identifiers)
         ):
             conn.execute("DELETE FROM kv WHERE key=?", (row["key"],))

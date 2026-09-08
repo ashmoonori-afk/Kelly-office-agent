@@ -383,12 +383,22 @@ def _qualification(profile, home):
         for case in report.cases
     ):
         return "failed_checks"
+    excluded = {
+        "L": {"planning", "semantic_review"},
+        "M": {"semantic_review"},
+        "H": set(),
+    }
+    if any(case.task in excluded[case.role] for case in report.cases):
+        return "invalid_report"
     tasks = set(binding.capabilities) - {"structured_output"}
     for role in binding.roles:
         cases = [case for case in report.cases if case.role == role]
-        if len({case.fixture_sha256 for case in cases}) < 20 or not tasks <= {
-            case.task for case in cases
-        }:
+        required = tasks - excluded[role]
+        if (
+            not required
+            or len({case.fixture_sha256 for case in cases}) < 20
+            or not required <= {case.task for case in cases}
+        ):
             return "insufficient_coverage"
         accepted = sum(case.accepted for case in cases)
         reference = sum(case.reference_accepted for case in cases)

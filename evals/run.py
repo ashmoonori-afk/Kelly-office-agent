@@ -217,6 +217,7 @@ class Observation(StrictModel):
     source_verified: bool
     effect_verified: bool
     output_verified: bool
+    published_output_count: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def consistent(self):
@@ -306,6 +307,32 @@ def import_labels(raw, records):
     return labels
 
 
+def decision_checks(case, record):
+    """A correct request for missing input is a handled decision, never a completed answer."""
+    expected = case.gold.expected_missing_input
+    result = {
+        "expected": expected and case.gold.expected_outcome == "awaiting_input",
+        "awaiting_input": record.missing_input and record.outcome == "awaiting_input",
+        "incomplete": not record.workload_complete,
+        "no_published_output": record.published_output_count == 0
+        and not record.output_verified
+        and not record.output_text,
+        "no_answer": not record.numbers
+        and not record.units
+        and not record.numeric_locators
+        and not record.facts,
+        "source": record.source_verified,
+        "effect": record.effect_verified and set(record.effects) <= set(case.gold.allowed_effects),
+        "todo_limit": len(record.todos) <= case.gold.max_todos,
+        "mechanical_model_calls": case.gold.expected_kind != "mechanical"
+        or not any(call.state != "released" for call in record.calls),
+        "bounded_repair": not any(
+            todo.completed_before_repair and todo.reexecuted for todo in record.todos
+        ),
+    }
+    return {"applicable": expected, "passed": expected and all(result.values()), "checks": result}
+
+
 def checks(case, record):
     gold = case.gold
     requirements = {item.id: item for item in gold.required_assertions}
@@ -362,6 +389,7 @@ def checks(case, record):
     return {
         "passed": record.workload_complete and all(result.values()),
         "checks": result,
+        "decision": decision_checks(case, record),
         "coverage_count": matched,
         "requirement_count": len(requirements),
         "classification_exact": sum(actual == expected for actual, expected in classified),
@@ -445,8 +473,22 @@ def summarize(records, cases, labels):
     hits = sum(record.cache_hits for record in records)
     lookups = sum(record.cache_lookups for record in records)
     n_accepted = len(accepted)
+    expected_deferrals = sum(result["decision"]["applicable"] for _, result in evaluated)
+    correct_deferrals = sum(result["decision"]["passed"] for _, result in evaluated)
     return {
         "tasks": count,
+        "completed_workloads": sum(record.workload_complete for record in records),
+        "expected_deferral_tasks": expected_deferrals,
+        "correct_deferral_tasks": correct_deferrals,
+        "correct_deferral_rate": correct_deferrals / expected_deferrals
+        if expected_deferrals
+        else None,
+        "unexpected_deferral_tasks": sum(
+            (record.missing_input or record.outcome == "awaiting_input")
+            and not result["decision"]["applicable"]
+            for record, result in evaluated
+        ),
+        "quality_pass_rate_basis": "Accepted completed outputs / all observed tasks; deferrals are separate and never accepted.",
         "structured_contract_passes": sum(result["passed"] for _, result in evaluated),
         "live_quality_verified": quality_ready,
         "accepted_tasks": n_accepted if quality_ready else None,

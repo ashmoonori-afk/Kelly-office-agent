@@ -64,11 +64,12 @@ Routes use task complexity and required capabilities. Prices and remaining spend
 
 The current cloud adapter is **xAI**. Model availability, project permission, capabilities, and matching quality evidence must all pass before a model can handle work. Live model qualification and the full A/B/C workload comparison are unfinished.
 
-Local file, database, browser, and daemon workflows have been exercised. Live provider/Telegram acceptance, clean Windows installation, full accessibility, and Office layout verification remain incomplete. A document's structural checks do not guarantee its visual layout. This is a preview, with no measured percentage savings claim.
+Windows CI checks local file, database, browser, and daemon workflows, plus an isolated install, start, stop, and uninstall. Live provider/Telegram acceptance, full accessibility, and Office layout verification remain incomplete. A document's structural checks do not guarantee its visual layout. This is a preview, with no measured percentage savings claim.
 
 ## Setup and maintenance
 
 - [Model configuration and an explicit connection probe](docs/PROVIDER.md)
+- [Candidate qualification and workload evaluation](evals/README.md)
 - [Telegram setup and delivery recovery](docs/TELEGRAM.md)
 - [Local diagnostics, log export, backup, and restore](docs/OPERATIONS.md)
 - [30-day retention and pinned results](docs/RETENTION.md)

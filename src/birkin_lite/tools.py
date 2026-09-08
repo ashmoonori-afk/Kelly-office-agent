@@ -8,7 +8,7 @@ from pydantic import Field, model_validator
 
 from . import office
 from .artifacts import metadata, open_artifact, publish_draft
-from .context import cache_get, cache_put, extraction_cache_key
+from .context import cache_get, cache_put, extraction_cache_key, record_cache_lookup
 from .contracts import (
     AppError,
     DraftReply,
@@ -175,6 +175,7 @@ def extract(args, context):
         source_versions=versions,
         now=now.isoformat(),
     )
+    record_cache_lookup(conn, run["id"], hit=cached is not None)
     if cached is not None:
         return cached
     spans = office.extract(value.artifact_id, projection, limits, context)
@@ -313,20 +314,28 @@ def _content_from_input(value, output_format):
         groups = value["groups"] or [
             {"key": "전체", "sums": {column: value["columns"][column]["sum"] for column in columns}}
         ]
+        unit = (
+            f" ({value['unit']})"
+            if output_format in {"csv", "xlsx"} and value["unit"] != "unspecified"
+            else ""
+        )
+        headers = ["그룹", *(column + unit for column in columns)]
+        rows = [[group["key"], *[group["sums"][c] for c in columns]] for group in groups]
+        if value.get("ratio") is not None:
+            ratio, policy = value["ratio"], value["policy"]["ratio"]
+            headers.append(f"전체 비율 ({policy['numerator']}/{policy['denominator']})")
+            rendered = (
+                "미정 (분모가 0)" if ratio["reason"] == "zero_denominator" else ratio["value"]
+            )
+            for index, row in enumerate(rows):
+                row.append(rendered if index == 0 else "")
         return office.DocumentContent.model_validate(
             {
                 "title": "" if output_format in {"csv", "xlsx"} else "집계 결과",
                 "paragraphs": []
                 if output_format in {"csv", "xlsx"}
                 else [f"단위: {value['unit']}", f"포함 행: {value['row_counts']['included']}"],
-                "tables": [
-                    {
-                        "headers": ["그룹", *columns],
-                        "rows": [
-                            [group["key"], *[group["sums"][c] for c in columns]] for group in groups
-                        ],
-                    }
-                ],
+                "tables": [{"headers": headers, "rows": rows}],
             }
         )
     return office.DocumentContent.model_validate(value)

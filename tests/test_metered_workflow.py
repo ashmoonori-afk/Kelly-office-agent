@@ -281,6 +281,10 @@ def test_verified_response_cache_reuses_output_without_a_new_provider_call(tmp_p
             conn, current["id"], actor=OWNER, tools=tools, complete=complete, now=NOW, home=tmp_path
         )
         assert finished["state"] == "succeeded"
+        assert get_value(conn, "cache_observation:" + current["id"]) == {
+            "lookups": 1,
+            "hits": int(current["id"] != run["id"]),
+        }
     assert len(seen) == 1 and conn.execute("SELECT count(*) FROM calls").fetchone()[0] == 1
     assert get_value(conn, "cache_hit:" + current["id"] + ":t1")
     conn.close()

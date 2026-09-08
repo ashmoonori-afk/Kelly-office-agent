@@ -204,18 +204,22 @@ def _recognize(text):
     return next(iter(matches)) if len(matches) == 1 else None
 
 
-def _fixed_scope(text, recipe, sources, output_format):
-    """Conservative shortcuts: unexplained words go to the planner, never disappear."""
+def _without_output_phrase(text, output_format):
     # This exact phrase only restates the already-confirmed output format.
     # Other format names and additional instructions remain for the planner.
     format_name = r"(?:text|txt)" if output_format == "text" else re.escape(output_format)
-    text = re.sub(
+    return re.sub(
         rf"(?<!\w){format_name}(?:\s*파일)?(?:으)?로\s*"
         r"(?:만들어|작성해)\s*(?:주세요|줘)(?!\w)",
         "",
         text,
         flags=re.IGNORECASE,
     )
+
+
+def _fixed_scope(text, recipe, sources, output_format):
+    """Conservative shortcuts: unexplained words go to the planner, never disappear."""
+    text = _without_output_phrase(text, output_format)
     text = re.sub(r"[\"'‘“][^\"'’”]{1,500}[\"'’”]", "", text) if recipe == "search_answer" else text
     vocabulary = [
         "첨부한",
@@ -394,6 +398,18 @@ def _header_mentioned(header, text):
     )
 
 
+def _aggregate_policy(text, source, inputs):
+    policy = inputs.get("policy", {})
+    if (
+        isinstance(policy, dict)
+        and "thousands_separator" not in policy
+        and source.get("format") == "csv"
+        and re.search(r"따옴표로\s*감싼\s*천\s*단위", text)
+    ):
+        return {**policy, "thousands_separator": ","}
+    return policy
+
+
 def _aggregate_args(request, sources, inputs):
     allowed = set(AggregateArgs.model_fields)
     if set(inputs) - allowed:
@@ -434,11 +450,98 @@ def _aggregate_args(request, sources, inputs):
         "group_by": group,
         "value_columns": values,
         **inputs,
+        "policy": _aggregate_policy(request.request, source, inputs),
     }
     try:
         return AggregateArgs.model_validate(supplied).model_dump(), None
     except ValidationError:
         raise AppError("INVALID_INPUT") from None
+
+
+def _confirmed_aggregate_text(text, sources, inputs, output_format, request_text):
+    """Remove only restatements of typed aggregate policies; never change execution args."""
+    selected = inputs.get("artifact_id")
+    candidates = [source for source in sources if selected in {None, source.get("artifact_id")}]
+    if len(candidates) != 1:
+        return text
+    source = candidates[0]
+    try:
+        args = AggregateArgs.model_validate(
+            {
+                "artifact_id": source["artifact_id"],
+                **inputs,
+                "policy": _aggregate_policy(request_text, source, inputs),
+            }
+        )
+    except ValidationError:
+        return text
+    policy = args.policy
+    if source.get("headers_valid") and (
+        not set(args.value_columns) <= set(source.get("headers", []))
+        or args.group_by is not None
+        and args.group_by not in source.get("headers", [])
+    ):
+        raise AppError("INVALID_INPUT")
+    chosen_headers = {*args.value_columns, args.group_by}
+    if any(
+        header not in chosen_headers and _header_mentioned(header, text)
+        for header in source.get("headers", [])
+    ):
+        return None
+    text = re.sub(r"\s+", "", _without_output_phrase(text, output_format))
+
+    def literal(value):
+        return re.escape(re.sub(r"\s+", "", value))
+
+    columns = "(?:" + "|".join(literal(name) for name in args.value_columns) + ")"
+    rules = [(r"(?:환불)?음수를포함해", ""), (r"수식결과가확정되지않으면합계를중단해", "합계")]
+    if source.get("format") == "csv" and policy.thousands_separator == ",":
+        rules.append((r"따옴표로감싼천단위", ""))
+    if args.sheet:
+        rules.append((literal(args.sheet) + r"시트의", ""))
+    if args.cell_range:
+        rules.append((literal(args.cell_range) + r"범위의", ""))
+    if policy.include_hidden_rows:
+        rules.append((r"숨긴행(?:도|을)포함해서", ""))
+    else:
+        rules.append((r"숨긴행을제외해서", ""))
+    if policy.blank_policy == "skip":
+        rules.append((r"빈" + columns + r"셀은제외하고", ""))
+    if policy.mixed_policy == "skip":
+        rules.append((columns + r"의문자행을(?:명시적으로)?제외하고", ""))
+    else:
+        rules.append((columns + r"에문자가있으면합계하지말고입력보완을요청해", "합계"))
+    ordinal = ("0", "첫째", "둘째", "셋째", "넷째", "다섯째", "여섯째")[policy.decimal_places]
+    rules.extend(
+        [
+            (rf"소수(?:{ordinal}|{policy.decimal_places})자리까지", ""),
+            (r"(?:ROUND_)?" + policy.rounding.removeprefix("ROUND_") + r"으로", ""),
+        ]
+    )
+    if policy.ratio:
+        numerator, denominator = literal(policy.ratio.numerator), literal(policy.ratio.denominator)
+        rules.extend(
+            [
+                (rf"({columns})수(?=와|과|를|을)", r"\1"),
+                (denominator + r"가0이면비율을미정으로남겨", ""),
+                (numerator + r"비율을구해", ""),
+            ]
+        )
+    if args.group_by and source.get("format") == "csv":
+        rules.append((r"날짜문자열을보존해", ""))
+    rules.append((rf"({columns})(?:열)?의", r"\1"))
+    if len(args.value_columns) == 1:
+        rules.append((rf"({columns})만", r"\1"))
+    for pattern, replacement in rules:
+        text = re.sub(pattern, replacement, text)
+    # These grammatical forms carry no extra computation or filtering rule.
+    for phrase in ("합산한뒤", "합산하고", "합계내고", "각각합계", "합계뒤"):
+        text = text.replace(phrase, "합계")
+    for phrase in ("작성해", "반올림해", "표시해"):
+        text = text.replace(phrase, "해")
+    for name in args.value_columns:
+        text = re.sub(literal(name) + r"(?:과|와)", lambda _match, value=name: value, text)
+    return text
 
 
 def expand_recipe(request, inspected_sources, task_spec=None) -> PlanV1 | None:
@@ -452,19 +555,67 @@ def expand_recipe(request, inspected_sources, task_spec=None) -> PlanV1 | None:
         task_spec = TaskSpec.model_validate(
             task_spec.model_dump() if isinstance(task_spec, TaskSpec) else task_spec
         )
-    recognized = _recognize(request.request)
+    sources = list(inspected_sources)
+    scope_text = request.request
+    aggregate_scope = (
+        task_spec is not None and task_spec.intent == "aggregate" and task_spec.ambiguity == "clear"
+    )
+    currency_names = {
+        "원": "KRW",
+        "달러": "USD",
+        "유로": "EUR",
+        "엔": "JPY",
+        "위안": "CNY",
+        "파운드": "GBP",
+    }
+    currencies = {
+        currency_names.get(value, value.upper())
+        for value in re.findall(
+            r"(?<![A-Za-z가-힣])(?:KRW|USD|EUR|JPY|CNY|GBP|원|달러|유로|엔|위안|파운드)(?=$|[\s,.]|[과와을를이가로화])",
+            request.request,
+            re.IGNORECASE,
+        )
+    }
+    currency_missing = (
+        aggregate_scope
+        and len(currencies) > 1
+        and re.search(r"통합|환산|환율", request.request)
+        and re.search(r"합계|합산|집계", request.request)
+    )
+    # A target unit is not an exchange rate. The fixed aggregate contract never converts money.
+    if aggregate_scope and not currency_missing:
+        scope_text = _confirmed_aggregate_text(
+            scope_text, sources, task_spec.inputs, request.output_format, request.request
+        )
+        if scope_text is None:
+            return None
+    recognized = _recognize(scope_text)
     recipe = task_spec.intent if task_spec else recognized
     if recipe not in RECIPES:
         return None
-    sources = list(inspected_sources)
-    if recognized != recipe or not _fixed_scope(
-        request.request, recipe, sources, request.output_format
+    if not currency_missing and (
+        recognized != recipe or not _fixed_scope(scope_text, recipe, sources, request.output_format)
     ):
         return None
+    conditions = task_spec.acceptance if task_spec else []
+    if aggregate_scope and not currency_missing:
+        conditions = [
+            _confirmed_aggregate_text(
+                condition, sources, task_spec.inputs, request.output_format, request.request
+            )
+            for condition in conditions
+        ]
+        if any(
+            condition is None
+            or condition != "업무완료"
+            and not _fixed_scope(condition, recipe, sources, request.output_format)
+            for condition in conditions
+        ):
+            return None
     if task_spec is not None and (
         task_spec.ambiguity == "uncertain"
         or task_spec.inputs.get("user_corrections")
-        or any(re.search(DYNAMIC_PATTERN, condition) for condition in task_spec.acceptance)
+        or any(re.search(DYNAMIC_PATTERN, condition) for condition in conditions)
     ):
         return None
     ids = [source.get("artifact_id") for source in sources]
@@ -479,7 +630,7 @@ def expand_recipe(request, inspected_sources, task_spec=None) -> PlanV1 | None:
     inputs = task_spec.inputs if task_spec else {}
     todos = []
     requirements = [Requirement(id="r1", text=request.request[:500])]
-    missing = None
+    missing = "통합 집계에 사용할 통화와 환율 기준을 확인해 주세요" if currency_missing else None
     if task_spec and task_spec.ambiguity == "missing_input":
         missing = "필수 입력을 확인해 주세요"
     if recipe in {"aggregate", "weekly_report"}:

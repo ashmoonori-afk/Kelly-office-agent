@@ -124,6 +124,10 @@ def test_high_does_not_reuse_balanced_response_cache(tmp_path):
         assert execute(conn, tmp_path, run, complete)["state"] == "succeeded"
         hit = get_value(conn, "cache_hit:" + run["id"] + ":t1")
         assert bool(hit) == (key == "warm")
+        observed = get_value(conn, "cache_observation:" + run["id"])
+        assert observed == (
+            None if quality == "high" else {"lookups": 1, "hits": int(key == "warm")}
+        )
     assert seen == ["L", "L", "H"]
     assert (
         conn.execute("SELECT count(*) FROM kv WHERE key LIKE 'cache:response_%'").fetchone()[0] == 1

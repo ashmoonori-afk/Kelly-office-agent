@@ -80,14 +80,28 @@ def test_csv_decimal_blank_mixed_counts_ratio_and_rounding(tmp_path):
     assert result["selection"]["cell_range"] == "A1:C5"
     assert result["groups"][0]["filter"] == {"column": "group", "equals": "A"}
     assert result["ratio"] == {"value": None, "reason": "zero_denominator"}
-    with pytest.raises(AppError):
+    with pytest.raises(AppError) as mixed:
         office.aggregate(source["id"], None, None, None, ["amount"], context)
+    assert mixed.value.code == "MISSING_INPUT"
     with pytest.raises(AppError) as blank:
         office.aggregate(
             source["id"], None, "A1:C4", None, ["amount"], context, blank_policy="error"
         )
     assert blank.value.code == "MISSING_INPUT"
     context["conn"].close()
+
+
+def test_number_accepts_strict_thousands_groups_without_guessing_decimal_commas():
+    from decimal import Decimal
+
+    for text, expected in (("1,200", "1200"), (" -12,345,678.90 ", "-12345678.90")):
+        assert office._number(text) is None
+        assert office._number(text, thousands_separator=",") == Decimal(expected)
+    for text in ("1,2", "12,34", "1234,567", "1,234,56", "1.234,50", "1,200원", "1,,200"):
+        assert office._number(text) is None
+        assert office._number(text, thousands_separator=",") is None
+    assert office._number("0,125") is None
+    assert office._number("0,125", thousands_separator=",") == Decimal(125)
 
 
 def test_long_decimal_near_half_is_not_rounded_before_sum(tmp_path):

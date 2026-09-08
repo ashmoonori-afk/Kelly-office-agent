@@ -22,7 +22,7 @@
 | POST /api/artifacts/{id}/pin | `{pinned:true|false}` | 결과의 보관 고정 상태 |
 | POST /api/runs | RunRequest; `Idempotency-Key` header 필수 | 202 `{run}` |
 | GET /api/runs | `project_id` | `{runs}` 최근 100개 |
-| GET /api/runs/{id} | 없음 | `{run,steps,task_spec,artifacts,approvals,deliveries,usage,calls}` |
+| GET /api/runs/{id} | 없음 | `{run,steps,task_spec,artifacts,approvals,deliveries,usage,calls,automation_observation}` |
 | POST /api/runs/{id}/input | `{expected_revision,task_spec}` | 202 `{run}` |
 | POST /api/runs/{id}/cancel | `{}` | 202 `{run}` |
 
@@ -30,11 +30,15 @@ RunRequest는 `{request,project_id,artifact_ids,quality_mode,output_format}`. �
 
 TaskSpec은 `{intent,source_ids,inputs,acceptance,required_capabilities,ambiguity}`. 화면은 기존 task_spec을 기본값으로 사용하고 사용자가 선택한 자료·시트·범위·값 열·그룹 열·완료 조건을 보완한다. `inputs`는 이 실제 계약에서 허용하는 이름을 사용하며 누락 값은 임의 추측하지 않는다. `supply_inputs`의 revision 변경과 재준비 marker는 같은 DB transaction에 저장한다.
 
+숫자 집계의 `inputs.policy.thousands_separator`는 기본 null이며 쉼표 숫자의 뜻을 추측하지 않는다. 명시한 `","`는 정확한 세 자리 천 단위 그룹만 허용한다. CSV의 명시적 천 단위 요청에서만 같은 정책을 도출하며 명시한 null은 덮어쓰지 않는다. 필수 숫자가 비었거나 숫자로 해석되지 않고 해당 정책이 error이면 결과를 발행하지 않고 입력 보완을 기다린다.
+
 run/steps는 기존 DB의 JSON 필드를 해석한 객체다. step.spec_json.todo에서 난도·배정, original/final classification과 correction_reason에서 변경을 읽는다. run.result_json.outputs의 artifact/receipt와 artifacts 목록으로 결과를 보여준다. 형식·수치·출처·의미·시각 증거를 섞지 않는다. 원본/자료·결과가 없다는 상태도 정확히 보여준다.
 
 ## 자동화와 승인
 
-`calls`는 호출 순서대로 id/step_id/provider/model_id/purpose/state/role/reasoning_effort와 토큰 관측값만 담는다. prompt·비공개 route·키·원시 응답은 보내지 않는다. step_id=null은 계획 호출이다. UI는 실제 호출 모델을 TODO 아래에 표시하며 호출 전에는 모델명을 추정하지 않는다.
+`calls`는 id/step_id/provider/model_id/purpose/state/role/reasoning_effort, 토큰 관측값, `logical_call_no`, `transport_attempt_no`, `actual_micro_usd`, `price_stale`을 담는다. prompt·비공개 route·키·원시 응답은 보내지 않는다. step_id=null은 계획 호출이다. UI는 실제 호출 모델을 TODO 아래에 표시하며 호출 전에는 모델명을 추정하지 않는다. 같은 논리 호출의 첫 HTTP 시도와 재시도 비용을 구분한다. 관측되지 않은 비용은 null이며 전송 전 released 시도는 합계에서 제외한다.
+
+`automation_observation`은 해당 소유자·프로젝트·봇·사건과 일치하는 기록만 반환하며, 없으면 null이다. 예약/수신/시작/직전 tick/이번 tick/기록 시각과 `clock_rollback`, `scheduled_daemon_state`, `pc_power_state`를 제공한다. 예약 시각과 실제 표본 시각이 일치할 때만 daemon을 observed로 표시하며, 관측 공백과 시계 역행은 unknown이다. PC 전원은 항상 unknown이다. 세션 ID는 노출하지 않는다.
 
 | 요청 | body 또는 query | 응답 |
 |---|---|---|
@@ -64,6 +68,6 @@ AutomationConfig는 automation.py의 strict 계약이다. `name,project_id,recip
 
 ## 화면과 실행 수명주기
 
-대화/자동화/기록과 설정 dialog. 대화는 프로젝트·파일 선택, 요청, 품질, 형식, 실행으로 시작한다. 기록과 선택 run은 1초 polling으로 갱신하며 버튼 작업 중 중복 요청을 막는다. run 생성 idempotency key는 재시도에도 유지한다. 명시 label·focus·aria-live·색상 외 상태 문구와 360px/200% 확대를 지원한다.
+대화/자동화/기록과 설정 dialog. 대화는 프로젝트·파일 선택, 요청, 품질, 형식, 실행으로 시작한다. 기록과 선택 run은 1초 polling으로 갱신하며 버튼 작업 중 중복 요청을 막는다. run 생성 idempotency key는 재시도에도 유지한다. 명시 label·focus·aria-live·색상 외 상태 문구와 360px 화면 재배치를 구현했다. 실제 브라우저 200% 확대와 스크린리더 검증은 남아 있다.
 
 runtime은 시작 시 OS lock 획득 후 복구한다. 업무 실행 동시성 1, scheduler 15초, Telegram long polling과 outbox는 독립 loop로 운영한다. 대기 입력/승인은 실행 슬롯을 잡지 않는다. 정상 종료는 새 claim을 멈추고 진행 중 실제 스레드가 끝나 DB/사용량을 정산한 뒤 client와 lock을 닫는다. async task 취소만으로 외부 호출이 종료됐다고 판정하지 않는다.

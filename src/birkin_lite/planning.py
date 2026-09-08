@@ -15,8 +15,17 @@ from .contracts import (
     StepInput,
     TaskFacts,
     ToolExecutor,
+    digest,
 )
-from .db import allowed_sources, get_run, get_task_spec, get_value, row_dict
+from .db import (
+    allowed_sources,
+    get_automation,
+    get_run,
+    get_task_spec,
+    get_value,
+    row_dict,
+    set_value,
+)
 from .engine import install_plan
 from .routing import choose_model, choose_planner, expand_recipe, normalize_todo
 from .tools import catalog
@@ -148,6 +157,58 @@ def _validate_requirements(result, confirmed_spec, permitted, completed_ids=()):
             raise AppError("PLAN_INVALID")
 
 
+def _automation_scope(conn, run, actor, request, confirmed_spec, privacy_policy):
+    if run["automation_id"] is None:
+        return None
+    bot = get_automation(conn, run["automation_id"], actor)
+    if (
+        not bot["enabled"]
+        or bot["revision"] != run["automation_revision"]
+        or digest(bot["config_json"]) != run["policy_json"].get("automation_config_hash")
+    ):
+        raise AppError("POLICY_DENIED")
+    return digest(
+        [
+            actor.id,
+            bot["id"],
+            bot["revision"],
+            run["project_id"],
+            run["policy_json"],
+            request.model_dump(),
+            confirmed_spec.model_dump() if confirmed_spec is not None else None,
+            privacy_policy.model_dump(),
+        ]
+    )
+
+
+def _previous_automation_plan(conn, run, actor, scope):
+    snapshot = get_value(conn, "automation_plan:" + run["automation_id"], {})
+    if snapshot.get("scope") != scope or snapshot.get("run_id") == run["id"]:
+        return None, None
+    # A retained snapshot may outlive its run. Never search other actors or bots.
+    previous = row_dict(
+        conn.execute("SELECT * FROM runs WHERE id=?", (snapshot["run_id"],)).fetchone()
+    )
+    if (
+        previous is None
+        or any(
+            previous[key] != run[key]
+            for key in ("actor_id", "project_id", "automation_id", "automation_revision")
+        )
+        or previous["state"] != "succeeded"
+        or not previous["plan_json"]
+    ):
+        return None, None
+    result = PlanningResultV1(
+        task_spec=get_task_spec(conn, previous["id"], actor),
+        plan=previous["plan_json"]["current"],
+    )
+    # Only structure crosses runs: execution state, outputs and approvals stay behind.
+    for todo in result.plan.todos:
+        todo.status = "pending"
+    return result, snapshot["sources"]
+
+
 def prepare_run(
     conn,
     home,
@@ -173,6 +234,7 @@ def prepare_run(
     permitted = allowed_sources(conn, run, actor)
     request = RunRequest.model_validate({**run["request_json"], "artifact_ids": permitted})
     confirmed_spec = get_task_spec(conn, run_id, actor)
+    automation_scope = _automation_scope(conn, run, actor, request, confirmed_spec, privacy_policy)
     completed_ids = [
         row_dict(row)["spec_json"]["todo"]["id"]
         for row in conn.execute(
@@ -200,6 +262,34 @@ def prepare_run(
         "permitted_sources": permitted,
         "completed_ids": completed_ids,
     }
+    previous_plan = run["plan_json"]["current"] if run["plan_json"] else None
+    if proposed is None and previous_plan is None and automation_scope is not None:
+        prior, source_digest = _previous_automation_plan(conn, run, actor, automation_scope)
+        if prior is not None:
+            previous_plan = prior.plan
+            # Unversioned memory/search and other ambient state require planner re-evaluation.
+            versioned = bool(inspected) and all(source.get("sha256") for source in inspected)
+            attached_only = all(
+                not isinstance(todo.executor, ToolExecutor)
+                or todo.executor.tool_name
+                in {
+                    "source.inspect",
+                    "source.extract",
+                    "table.aggregate",
+                    "document.create",
+                    "artifact.validate",
+                    "artifact.publish",
+                }
+                for todo in prior.plan.todos
+            )
+            if versioned and attached_only and source_digest == digest(inspected):
+                _validate_requirements(prior, confirmed_spec, permitted)
+                if not set(prior.task_spec.required_capabilities) <= supported:
+                    raise AppError("UNSUPPORTED_CAPABILITY")
+                plan, bindings = normalize_plan(prior.plan, **normalization)
+                proposed, task_spec = prior.plan, prior.task_spec
+            elif source_digest != digest(inspected):
+                errors = list(dict.fromkeys([*(errors or []), "SOURCE_CHANGED"]))
     if proposed is None:
         binding = choose_planner(
             capability_catalog,
@@ -225,7 +315,7 @@ def prepare_run(
                 binding=binding,
                 task_spec=confirmed_spec,
                 errors=errors,
-                previous_plan=run["plan_json"]["current"] if run["plan_json"] else None,
+                previous_plan=previous_plan,
                 completed_ids=completed_ids,
             )
             try:
@@ -268,14 +358,24 @@ def prepare_run(
         },
         **bindings,
     }
-    return install_plan(
+    # A planner may have been in flight while the bot was edited or disabled.
+    _automation_scope(conn, run, actor, request, confirmed_spec, privacy_policy)
+    installed = install_plan(
         conn,
         run_id,
         plan,
         actor,
         tools=tools,
+        requirements=PlanV1.model_validate(previous_plan).requirements if previous_plan else None,
         proposed_plan=proposed,
         expected_revision=run["revision"],
         task_spec=task_spec,
         route_bindings=bindings,
     )
+    if automation_scope is not None:
+        set_value(
+            conn,
+            "automation_plan:" + run["automation_id"],
+            {"scope": automation_scope, "sources": digest(inspected), "run_id": run_id},
+        )
+    return installed

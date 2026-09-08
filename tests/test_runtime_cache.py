@@ -108,6 +108,10 @@ def test_repeat_extract_reuses_exact_output_and_has_fixed_day_ttl(prepare):
     after = datetime.now(UTC)
     second = tool.execute({"artifact_id": source["id"]}, context)
     assert calls == ["extract"] and second == first
+    assert get_value(context["conn"], "cache_observation:" + context["run"]["id"]) == {
+        "lookups": 2,
+        "hits": 1,
+    }
     assert first["evidence"]["items"][0]["quote"] == "자료 검토를 진행한다."
     _, stored = cache_record(context, source)
     expiry = datetime.fromisoformat(stored["expires_at"])
@@ -165,6 +169,10 @@ def test_expired_cached_result_is_extracted_again(prepare):
     set_value(context["conn"], key, stored)
     result = tool.execute({"artifact_id": source["id"]}, context)
     assert calls == ["extract", "extract"]
+    assert get_value(context["conn"], "cache_observation:" + context["run"]["id"]) == {
+        "lookups": 2,
+        "hits": 0,
+    }
     assert result["evidence"]["items"][0]["quote"] == "자료 검토를 진행한다."
     assert datetime.fromisoformat(get_value(context["conn"], key)["expires_at"]) > datetime.now(UTC)
 

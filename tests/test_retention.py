@@ -71,6 +71,62 @@ def expire(home):
     return retention.expire_completed(conn, path, OWNER, now=NOW)
 
 
+def plan_snapshot(home):
+    _, conn, run_id = home
+    bot = db.create_automation(
+        conn,
+        OWNER,
+        {
+            "name": "완료된 예약 업무",
+            "project_id": "sales",
+            "recipe": "summarize",
+            "instruction": "합성 업무",
+            "trigger": {"kind": "once", "at": (NOW - timedelta(days=31)).isoformat()},
+        },
+        now=NOW - timedelta(days=32),
+    )
+    conn.execute(
+        "UPDATE runs SET automation_id=?,automation_revision=? WHERE id=?",
+        (bot["id"], bot["revision"], run_id),
+    )
+    key = "automation_plan:" + bot["id"]
+    snapshot = {"scope": "a" * 64, "sources": "b" * 64, "run_id": run_id}
+    db.set_value(conn, key, snapshot)
+    return key, snapshot
+
+
+@pytest.mark.parametrize("newer_pointer", [False, True])
+def test_expiry_clears_only_its_derived_plan_pointer_and_preserves_originals(home, newer_pointer):
+    path, conn, run_id = home
+    key, snapshot = plan_snapshot(home)
+    if newer_pointer:
+        next_run = db.create_run(conn, OWNER, "ui", "newer", REQUEST)
+        snapshot["run_id"] = next_run["id"]
+        db.set_value(conn, key, snapshot)
+    original = (path / "sources/source1.txt").read_bytes()
+    assert expire(home) == {"archived_runs": 1, "removed_files": 1, "purge_pending": 0}
+    assert db.get_value(conn, key) == (snapshot if newer_pointer else None)
+    assert db.get_run(conn, run_id, OWNER)["result_json"]["archived"] is True
+    assert not (path / "exports/result1.txt").exists()
+    assert (path / "sources/source1.txt").read_bytes() == original
+
+
+@pytest.mark.parametrize("change", ["other_bot", "extra_reference", "non_digest"])
+def test_plan_snapshot_exception_does_not_discard_other_references(home, change):
+    path, conn, _ = home
+    key, snapshot = plan_snapshot(home)
+    if change == "other_bot":
+        key = "automation_plan:another-bot"
+    elif change == "extra_reference":
+        snapshot["artifact_id"] = "result1"
+    else:
+        snapshot["sources"] = "result1"
+    db.set_value(conn, key, snapshot)
+    assert expire(home)["archived_runs"] == 0
+    assert db.get_value(conn, key) == snapshot
+    assert (path / "exports/result1.txt").exists()
+
+
 def test_expiry_removes_only_unpinned_results_and_preserves_idempotency(home):
     path, conn, run_id = home
     original = (path / "sources/source1.txt").read_bytes()
@@ -88,6 +144,7 @@ def test_expiry_removes_only_unpinned_results_and_preserves_idempotency(home):
 )
 def test_retention_protects_explicit_pins_references_and_unresolved_authority(home, protection):
     path, conn, run_id = home
+    key, snapshot = plan_snapshot(home)
     if protection == "pin":
         retention.pin_artifact(conn, "result1", OWNER, "sales", True)
     elif protection == "dependent":
@@ -119,6 +176,7 @@ def test_retention_protects_explicit_pins_references_and_unresolved_authority(ho
             (run_id, "a" * 64, NOW.isoformat()),
         )
     assert expire(home)["archived_runs"] == 0
+    assert db.get_value(conn, key) == snapshot
     assert (path / "exports/result1.txt").exists()
     if protection == "pin":
         retention.pin_artifact(conn, "result1", OWNER, "sales", False)
@@ -127,6 +185,7 @@ def test_retention_protects_explicit_pins_references_and_unresolved_authority(ho
 
 def test_archive_sql_failure_never_deletes_file_or_loses_payload(home):
     path, conn, run_id = home
+    key, snapshot = plan_snapshot(home)
     conn.execute(
         "CREATE TRIGGER retention_fault BEFORE UPDATE ON runs BEGIN SELECT RAISE(ABORT,'synthetic retention failure'); END"
     )
@@ -135,6 +194,7 @@ def test_archive_sql_failure_never_deletes_file_or_loses_payload(home):
     assert (path / "exports/result1.txt").exists()
     assert conn.execute("SELECT deleted_at FROM artifacts WHERE id='result1'").fetchone()[0] is None
     assert db.get_run(conn, run_id, OWNER)["request_json"] == REQUEST.model_dump()
+    assert db.get_value(conn, key) == snapshot
 
 
 def test_changed_file_is_not_deleted_and_missing_file_crash_window_recovers(home):
@@ -176,6 +236,7 @@ def test_recent_and_inaccessible_project_runs_are_not_archived(home):
 
 def test_unknown_usage_protects_completed_payload_until_reconciliation(home):
     path, conn, run_id = home
+    key, snapshot = plan_snapshot(home)
     conn.execute("UPDATE runs SET state='queued' WHERE id=?", (run_id,))
     binding = ModelBinding(
         provider="xai",
@@ -207,6 +268,7 @@ def test_unknown_usage_protects_completed_payload_until_reconciliation(home):
     assert expire(home)["archived_runs"] == 0
     assert (path / "exports/result1.txt").exists()
     assert usage.summarize_usage(conn, run_id, OWNER)["usage_state"] == "unknown"
+    assert db.get_value(conn, key) == snapshot
 
 
 def test_protected_batch_does_not_starve_later_runs_and_is_revisited(home):

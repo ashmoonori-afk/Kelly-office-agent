@@ -51,6 +51,63 @@ def no_horizontal_overflow(page):
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
 
 
+def test_browser_retry_costs_keep_unknown_and_untrusted_model_text(tmp_path, monkeypatch):
+    """Browser rendering boundary with synthetic API-shaped rows; no provider calls."""
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    with server(tmp_path) as (app, origin), sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        try:
+            page = browser.new_page(viewport={"width": 360, "height": 900}, locale="ko-KR")
+            errors = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.goto(origin)
+            page.get_by_label("일회용 연결 코드").fill(app.state.bootstrap_secret)
+            page.keyboard.press("Enter")
+            expect(page.locator("#app")).to_be_visible()
+            calls = [
+                {
+                    "logical_call_no": logical,
+                    "transport_attempt_no": number,
+                    "state": status,
+                    "actual_micro_usd": cost,
+                    "provider": "fixture",
+                    "model_id": '<img src=x onerror="window.COST_INJECTED=1">',
+                    "purpose": "generate",
+                    "usage_basis": "unknown" if cost is None else "estimated",
+                    "price_stale": True,
+                }
+                for number, logical, status, cost in (
+                    (1, 1, "settled", 12),
+                    (2, 1, "unknown", None),
+                    (3, 2, "released", None),
+                )
+            ]
+            page.evaluate(
+                "calls => renderRun({run: {id: 'fixture-view', automation_id: 'fixture-bot', "
+                "state: 'failed', revision: 1, "
+                "request_json: {request: '합성 비용 표시 검사'}}, calls, "
+                "usage: {actual_micro_usd: null}, automation_observation: "
+                "{scheduled_daemon_state: 'unknown', pc_power_state: 'unknown', "
+                "clock_rollback: true}})",
+                calls,
+            )
+            page.get_by_text("검증과 사용량 자세히", exact=True).click()
+            page.get_by_text("첫 시도와 재시도 비용", exact=True).click()
+            page.get_by_text("예약 시각 가동 관측", exact=True).click()
+            detail = page.locator("#run-detail")
+            for text in ("첫 HTTP 시도", "HTTP 재시도 1", "$0.000012", "비용 미확인", "합계 제외"):
+                expect(detail).to_contain_text(text)
+            expect(detail).to_contain_text("예약 시각 PC 전원")
+            expect(detail).to_contain_text("시스템 시계가 뒤로")
+            assert detail.locator("img").count() == 0
+            assert page.evaluate("window.COST_INJECTED === undefined")
+            no_horizontal_overflow(page)
+            assert errors == []
+        finally:
+            browser.close()
+
+
 def test_browser_office_bot_memory_keyboard_and_reflow(tmp_path, monkeypatch):
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)

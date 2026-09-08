@@ -12,6 +12,7 @@ from birkin_lite.contracts import (
     PrivacyPolicy,
     RunRequest,
     TaskFacts,
+    TaskSpec,
     TodoV1,
     ToolExecutor,
 )
@@ -130,6 +131,197 @@ def test_format_phrase_does_not_erase_mismatch_or_extra_requirements(request_tex
     )
 
 
+@pytest.mark.parametrize(
+    "text,inputs,format",
+    [
+        ("판매액 열 합계를 XLSX로 만들어 주세요.", {"value_columns": ["판매액"]}, "csv"),
+        ("따옴표로 감싼 천 단위 판매액을 합계 내 주세요.", {"value_columns": ["판매액"]}, "csv"),
+        ("판매액 열의 음수를 포함해 합계 내 주세요.", {"value_columns": ["판매액"]}, "csv"),
+        (
+            "무게 열을 소수 셋째 자리까지 합계 내 주세요.",
+            {"value_columns": ["무게"], "policy": {"decimal_places": 3}},
+            "csv",
+        ),
+        (
+            "팀별 판매액 합계를 작성해 주세요.",
+            {"value_columns": ["판매액"], "group_by": "팀"},
+            "csv",
+        ),
+        (
+            "빈 판매액 셀은 제외하고 합계 내 주세요.",
+            {"value_columns": ["판매액"], "policy": {"blank_policy": "skip"}},
+            "csv",
+        ),
+        (
+            "판매액의 문자 행을 제외하고 합계 내 주세요.",
+            {"value_columns": ["판매액"], "policy": {"mixed_policy": "skip"}},
+            "csv",
+        ),
+        (
+            "판매액에 문자가 있으면 합계하지 말고 입력 보완을 요청해 주세요.",
+            {"value_columns": ["판매액"], "policy": {"mixed_policy": "error"}},
+            "csv",
+        ),
+        (
+            "확정 시트의 판매액만 합계 내 주세요.",
+            {"value_columns": ["판매액"], "sheet": "확정"},
+            "xlsx",
+        ),
+        (
+            "A1:B5 범위의 판매액만 합계 내 주세요.",
+            {"value_columns": ["판매액"], "cell_range": "A1:B5"},
+            "csv",
+        ),
+        (
+            "숨긴 행도 포함해서 판매액을 합계 내 주세요.",
+            {"value_columns": ["판매액"], "policy": {"include_hidden_rows": True}},
+            "xlsx",
+        ),
+        (
+            "숨긴 행을 제외해서 판매액을 합계 내 주세요.",
+            {"value_columns": ["판매액"], "policy": {"include_hidden_rows": False}},
+            "xlsx",
+        ),
+        (
+            "합계 뒤 HALF_EVEN으로 소수 둘째 자리까지 표시해 주세요.",
+            {"value_columns": ["판매액"], "policy": {"rounding": "ROUND_HALF_EVEN"}},
+            "csv",
+        ),
+        (
+            "완료 수와 전체 수를 합산하고 전체가 0이면 비율을 미정으로 남겨 주세요.",
+            {
+                "value_columns": ["완료", "전체"],
+                "policy": {"ratio": {"numerator": "완료", "denominator": "전체"}},
+            },
+            "csv",
+        ),
+        (
+            "수식 결과가 확정되지 않으면 합계를 중단해 주세요.",
+            {"value_columns": ["판매액"]},
+            "xlsx",
+        ),
+    ],
+)
+def test_confirmed_aggregate_policies_restate_only_the_actual_tool_contract(text, inputs, format):
+    source = {
+        "artifact_id": "source-1",
+        "format": format,
+        "headers_valid": True,
+        "headers": ["팀", "판매액", "무게", "완료", "전체"],
+        "sheet": inputs.get("sheet"),
+    }
+    request = RunRequest(
+        request=text, project_id="sales", artifact_ids=["source-1"], output_format="xlsx"
+    )
+    spec = TaskSpec(
+        intent="aggregate",
+        source_ids=["source-1"],
+        inputs={"artifact_id": "source-1", **inputs},
+        acceptance=[text],
+    )
+    before = spec.model_dump()
+    plan = expand_recipe(request, [source], spec)
+    assert plan is not None
+    assert all(item.kind == "mechanical" for item in plan.todos)
+    assert plan.todos[0].executor.tool_name == "table.aggregate"
+    args = plan.todos[0].executor.args
+    assert args["value_columns"] == inputs["value_columns"]
+    assert args["sheet"] == inputs.get("sheet")
+    assert args["cell_range"] == inputs.get("cell_range")
+    assert all(args["policy"][key] == value for key, value in inputs.get("policy", {}).items())
+    assert any(requirement.text == text for requirement in plan.requirements)
+    assert "r1" in plan.todos[0].requirement_ids
+    assert spec.model_dump() == before and request.request == text
+    if "천 단위" in text:
+        assert args["policy"]["thousands_separator"] == ","
+
+
+@pytest.mark.parametrize(
+    "text,changes,acceptance",
+    [
+        ("빈 판매액 셀은 제외하고 합계 내 주세요.", {"policy": {"blank_policy": "error"}}, None),
+        (
+            "판매액의 문자 행을 제외하고 합계 내 주세요.",
+            {"policy": {"mixed_policy": "error"}},
+            None,
+        ),
+        (
+            "숨긴 행을 제외해서 판매액을 합계 내 주세요.",
+            {"policy": {"include_hidden_rows": True}},
+            None,
+        ),
+        ("판매액 열을 소수 셋째 자리까지 합계 내 주세요.", {"policy": {"decimal_places": 2}}, None),
+        (
+            "합계 뒤 HALF_EVEN으로 소수 둘째 자리까지 표시해 주세요.",
+            {"policy": {"rounding": "ROUND_HALF_UP"}},
+            None,
+        ),
+        ("A1:B6 범위의 판매액만 합계 내 주세요.", {"cell_range": "A1:B5"}, None),
+        ("확정 시트의 판매액만 합계 내 주세요.", {"sheet": "초안"}, None),
+        ("비용 합계를 작성해 주세요.", {}, None),
+        ("판매액 합계를 작성해 주세요. 해외 판매 행을 제외해 주세요.", {}, None),
+        ("판매액 합계를 작성해 주세요. 고객에게 전송해 주세요.", {}, None),
+        ("판매액 합계를 작성해 주세요.", {}, "이름을 익명화해 주세요"),
+        (
+            "따옴표로 감싼 천 단위 판매액을 합계 내 주세요.",
+            {"policy": {"thousands_separator": None}},
+            None,
+        ),
+    ],
+)
+def test_confirmed_arguments_never_erase_conflicting_or_unsupported_conditions(
+    text, changes, acceptance
+):
+    source = {
+        "artifact_id": "source-1",
+        "format": "csv",
+        "headers_valid": True,
+        "headers": ["판매액", "비용"],
+        "sheet": changes.get("sheet"),
+    }
+    spec = TaskSpec(
+        intent="aggregate",
+        source_ids=["source-1"],
+        inputs={"artifact_id": "source-1", "value_columns": ["판매액"], **changes},
+        acceptance=[text, *([acceptance] if acceptance else [])],
+    )
+    assert (
+        expand_recipe(
+            RunRequest(
+                request=text, project_id="sales", artifact_ids=["source-1"], output_format="xlsx"
+            ),
+            [source],
+            spec,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("currencies", ["원과 달러", "EUR와 JPY", "위안과 파운드"])
+def test_requested_cross_currency_total_requires_input_without_any_tool(currencies):
+    text = currencies + " 금액을 환산해서 통합 합계 내 주세요."
+    request = RunRequest(request=text, project_id="sales", artifact_ids=["source-1"])
+    source = {
+        "artifact_id": "source-1",
+        "format": "csv",
+        "headers_valid": True,
+        "headers": ["금액", "통화"],
+        "sheet": None,
+    }
+    spec = TaskSpec(
+        intent="aggregate",
+        source_ids=["source-1"],
+        inputs={"artifact_id": "source-1", "value_columns": ["금액"], "policy": {"unit": "원"}},
+        acceptance=[text],
+    )
+    plan = expand_recipe(request, [source], spec)
+    assert plan is not None and len(plan.todos) == 1
+    assert plan.todos[0].clarity == "missing_input"
+    assert plan.todos[0].executor.type == "model"
+    assert choose_model(plan.todos[0], [], PrivacyPolicy(project_id="sales")) is None
+    assert plan.requirements[0].text == text
+
+
 @pytest.mark.parametrize("case", CASES["cases"], ids=lambda case: case["id"])
 def test_spec_routing_cases_use_actual_normalization_and_binding(case):
     data = {**CASES["defaults"], **case["input"]}
@@ -223,6 +415,26 @@ def test_normalization_preserves_input_and_does_not_grant_a_tool():
     assert error.value.code == "PLAN_INVALID"
     with pytest.raises(AppError):
         normalize_todo(todo(usefulness="useful"), TaskFacts(requested_or_supporting=False))
+
+
+def test_acceptance_cannot_invent_a_different_numeric_locale_from_execution():
+    request = RunRequest(
+        request="금액 합계", project_id="sales", artifact_ids=["source-1"], output_format="xlsx"
+    )
+    task = TaskSpec(
+        intent="aggregate",
+        source_ids=["source-1"],
+        inputs={"value_columns": ["금액"]},
+        acceptance=["따옴표로 감싼 천 단위 금액 합계"],
+        ambiguity="clear",
+    )
+    source = {
+        "artifact_id": "source-1",
+        "format": "csv",
+        "headers": ["금액"],
+        "headers_valid": True,
+    }
+    assert expand_recipe(request, [source], task) is None
 
 
 def test_missing_input_and_optional_do_not_require_any_provider():

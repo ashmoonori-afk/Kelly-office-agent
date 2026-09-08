@@ -12,6 +12,7 @@ from birkin_lite.automation import (
     detect_events,
     latest_occurrence,
     next_occurrence,
+    record_daemon_observation,
     tick_automations,
 )
 from birkin_lite.contracts import Actor, AppError, RunRequest
@@ -53,6 +54,102 @@ def event(row, when=ANCHOR):
     events = detect_events(row, {}, when)
     assert len(events) == 1
     return events[0]
+
+
+@pytest.mark.parametrize(
+    "scenario,expected",
+    [("exact", "observed"), ("gap", "unknown"), ("restart", "unknown"), ("rollback", "unknown")],
+)
+def test_daemon_observation_distinguishes_samples_from_unknown_gaps(tmp_path, scenario, expected):
+    conn = db.init_db(tmp_path / "state.db")
+    row = enabled(conn, config({"kind": "once", "at": ANCHOR.isoformat()}))
+    record_daemon_observation(conn, OWNER, "session1", "start", NOW)
+    record_daemon_observation(conn, OWNER, "session1", "tick", ANCHOR - timedelta(seconds=15))
+    session, observed = "session1", ANCHOR
+    if scenario == "gap":
+        observed += timedelta(hours=1)
+    elif scenario == "restart":
+        observed += timedelta(seconds=5)
+        session = "session2"
+        record_daemon_observation(conn, OWNER, session, "start", observed)
+    elif scenario == "rollback":
+        record_daemon_observation(conn, OWNER, session, "tick", ANCHOR + timedelta(minutes=1))
+    runs = tick_automations(conn, tmp_path, OWNER, observed, daemon_session_id=session)
+    assert len(runs) == 1
+    key = "automation_observation:" + row["id"] + ":" + event(row).event_key
+    proof = db.get_value(conn, key)
+    assert proof["scheduled_daemon_state"] == expected
+    assert proof["pc_power_state"] == "unknown"
+    assert proof["observed_at"] == observed.isoformat()
+    assert proof["clock_rollback"] is (scenario == "rollback")
+    assert "daemon" not in runs[0]["request_json"]
+    conn.close()
+    conn = db.init_db(tmp_path / "state.db")
+    assert (
+        tick_automations(
+            conn, tmp_path, OWNER, observed + timedelta(seconds=15), daemon_session_id=session
+        )
+        == []
+    )
+    assert db.get_value(conn, key) == proof
+    assert db.get_value(conn, "daemon_session:session1")["stopped_at"] is None
+    assert conn.execute("SELECT count(*) FROM calls").fetchone()[0] == 0
+    conn.close()
+
+
+def test_daemon_event_observation_is_atomic_with_enqueue_and_keeps_pending_sample(tmp_path):
+    conn = db.init_db(tmp_path / "state.db")
+    row = enabled(conn)
+    record_daemon_observation(conn, OWNER, "session", "start", NOW)
+    conn.execute(
+        "CREATE TRIGGER reject_observation BEFORE INSERT ON kv WHEN NEW.key LIKE 'automation_observation:%' BEGIN SELECT RAISE(ABORT,'test fault'); END"
+    )
+    assert tick_automations(conn, tmp_path, OWNER, ANCHOR, daemon_session_id="session") == []
+    assert conn.execute("SELECT count(*) FROM inbox_events").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
+    assert db.get_value(conn, "daemon_session:session")["last_tick_at"] == ANCHOR.isoformat()
+    conn.execute("DROP TRIGGER reject_observation")
+    first = tick_automations(
+        conn, tmp_path, OWNER, ANCHOR + timedelta(seconds=5), daemon_session_id="session"
+    )[0]
+    later = ANCHOR + timedelta(minutes=5)
+    assert tick_automations(conn, tmp_path, OWNER, later, daemon_session_id="session") == []
+    key = "automation_observation:" + row["id"] + ":" + event(row, later).event_key
+    proof = db.get_value(conn, key)
+    assert proof["scheduled_daemon_state"] == "observed"
+    conn.execute("UPDATE runs SET state='cancelled' WHERE id=?", (first["id"],))
+    assert (
+        len(
+            tick_automations(
+                conn, tmp_path, OWNER, later + timedelta(seconds=20), daemon_session_id="session"
+            )
+        )
+        == 1
+    )
+    assert db.get_value(conn, key) == proof
+    conn.close()
+
+
+def test_daemon_batch_observes_each_event_with_fresh_clock(tmp_path):
+    conn = db.init_db(tmp_path / "state.db")
+    for name in ("first", "second"):
+        enabled(conn, config({"kind": "once", "at": ANCHOR.isoformat()}, name=name))
+    record_daemon_observation(conn, OWNER, "session", "start", NOW)
+    readings = []
+
+    def clock():
+        now = ANCHOR + timedelta(seconds=len(readings))
+        readings.append(now)
+        return now
+
+    assert len(tick_automations(conn, tmp_path, OWNER, clock, daemon_session_id="session")) == 2
+    proofs = [
+        db.row_dict(row)["value_json"]
+        for row in conn.execute("SELECT * FROM kv WHERE key LIKE 'automation_observation:%'")
+    ]
+    assert len({proof["observed_at"] for proof in proofs}) == 2
+    assert all(datetime.fromisoformat(proof["observed_at"]) in readings for proof in proofs)
+    conn.close()
 
 
 def test_daily_cap_includes_first_midnight_when_current_time_has_fold_one(tmp_path):

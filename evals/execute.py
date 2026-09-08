@@ -17,7 +17,7 @@ from .run import Case, Observation, condition_hash, fingerprint, load_cases, rea
 
 ACTOR = Actor(id="eval-owner", project_ids=["eval"])
 POLICY = Privacy(project_id="eval", allowed_providers=[], allow_cloud=False, local_only=True)
-ADAPTER_VERSION = "offline-workload-v1"
+ADAPTER_VERSION = "offline-workload-v2"
 STOP_STATES = {
     "succeeded",
     "failed",
@@ -115,6 +115,10 @@ def environment_hash():
     return fingerprint(
         {
             "adapter": ADAPTER_VERSION,
+            "adapter_code": {
+                name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+                for name in ("execute.py", "run.py")
+            },
             "code": {
                 name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
                 for name in modules
@@ -219,6 +223,87 @@ def reopened_output(home, conn, run, artifact_rows, step_rows):
 
 def numeric_observation(case, source_map, steps):
     """Normalize actual aggregate fields; retain actual locators in the ledger, never copy gold."""
+    import csv
+    from decimal import Decimal, InvalidOperation
+    from urllib.parse import unquote
+
+    def column_index(letters):
+        number = 0
+        for letter in letters:
+            number = number * 26 + ord(letter) - ord("A") + 1
+        return number - 1
+
+    def locations_for(column, group, source, aggregate, rows, row_locations):
+        selection = aggregate["selection"]
+        columns = aggregate["columns"]
+        sheet = selection.get("sheet")
+        bounds = re.fullmatch(r"([A-Z]+)([0-9]+):([A-Z]+)([0-9]+)", selection["cell_range"])
+        span = re.fullmatch(
+            r"(?:csv:range:|xlsx:([^!]+)!)([A-Z]+)([0-9]+):([A-Z]+)([0-9]+)",
+            columns[column].get("locator", ""),
+        )
+        if not bounds or not span or span[2] != span[4]:
+            return []
+        if (unquote(span[1]) if span[1] else None) != sheet:
+            return []
+        header, last = int(bounds[2]), int(bounds[4])
+        index = column_index(span[2])
+        if (
+            int(span[3]) != header + 1
+            or int(span[5]) != last
+            or not 1 <= header <= last <= len(rows)
+            or not column_index(bounds[1]) <= index <= column_index(bounds[3])
+            or index >= len(rows[header - 1])
+            or rows[header - 1][index] != column
+        ):
+            return []
+        hidden = source.fixture.get("hidden_rows", {}).get(sheet, [])
+        contributing = []
+        for number in range(header + 1, last + 1):
+            if number in hidden and not selection["include_hidden_rows"]:
+                continue
+            value = rows[number - 1][index] if index < len(rows[number - 1]) else None
+            if value is None or isinstance(value, bool):
+                continue
+            text = str(value).strip()
+            if aggregate["policy"].get("thousands_separator") == ",":
+                text = text.replace(",", "")
+            try:
+                valid = Decimal(text).is_finite()
+            except InvalidOperation:
+                valid = False
+            if valid:
+                contributing.append(number)
+        if len(contributing) != columns[column]["count"]:
+            return []
+        if group is not None:
+            filters = group.get("filter", {})
+            headers = rows[header - 1]
+            if (
+                filters.get("column") != selection.get("group_by")
+                or filters.get("equals") != group["key"]
+                or headers.count(filters.get("column")) != 1
+            ):
+                return []
+            group_index = headers.index(filters["column"])
+            if not column_index(bounds[1]) <= group_index <= column_index(bounds[3]):
+                return []
+            contributing = [
+                number
+                for number in contributing
+                if group_index < len(rows[number - 1])
+                and str(
+                    rows[number - 1][group_index]
+                    if rows[number - 1][group_index] is not None
+                    else ""
+                )
+                == filters["equals"]
+            ]
+        selected_rows = [header, *contributing]
+        if not all(number in row_locations for number in selected_rows):
+            return []
+        return [row_locations[number] for number in selected_rows]
+
     numbers, units, locators = {}, {}, {}
     for step in steps:
         aggregate = (step["output_json"] or {}).get("aggregate")
@@ -228,32 +313,69 @@ def numeric_observation(case, source_map, steps):
         source = next(
             source for source in case.sources if source_map[source.id]["id"] == artifact_id
         )
-        selected = aggregate["selection"]["cell_range"]
-        bounds = re.fullmatch(r"[A-Z]+([0-9]+):[A-Z]+([0-9]+)", selected)
-        locations = list(source.locators)
-        if bounds and source.filename.endswith(".csv"):
-            locations = [
-                f"{source.id}:L{index}"
-                for index in range(int(bounds[1]), int(bounds[2]) + 1)
-                if f"{source.id}:L{index}" in source.locators
-            ]
+        selection = aggregate["selection"]
         columns = aggregate["columns"]
         groups = aggregate["groups"]
+        sheets = source.fixture.get("sheets", {})
+        sheet = selection.get("sheet")
+        rows = sheets.get(sheet, [])
+        row_locations = {}
+        if aggregate["format"] == "csv":
+            rows = []
+            reader = csv.reader(io.StringIO(source.text), delimiter=selection["delimiter"])
+            raw_lines = source.text.splitlines()
+            for row in reader:
+                rows.append(row)
+                # A multiline CSV record cannot be inferred from a physical-line locator.
+                key = f"{source.id}:L{reader.line_num}"
+                if (
+                    reader.line_num == len(rows)
+                    and source.locators.get(key) == raw_lines[reader.line_num - 1]
+                ):
+                    row_locations[len(rows)] = key
+        elif aggregate["format"] == "xlsx":
+            for number, row in enumerate(rows, 1):
+                rendered = io.StringIO()
+                csv.writer(rendered, lineterminator="").writerow(row)
+                quotes = {f"{sheet} 시트: {rendered.getvalue()}"}
+                if len(sheets) == 1:
+                    quotes.add(rendered.getvalue())
+                matches = [key for key, quote in source.locators.items() if quote in quotes]
+                # Duplicate descriptive rows have no unambiguous coordinate mapping.
+                if len(matches) == 1 and rows.count(row) == 1:
+                    row_locations[number] = matches[0]
+
         if groups:
             values = {
-                str(group["key"]) if len(columns) == 1 else str(group["key"]) + "/" + column: value
+                str(group["key"]) if len(columns) == 1 else str(group["key"]) + "/" + column: (
+                    value,
+                    locations_for(column, group, source, aggregate, rows, row_locations),
+                )
                 for group in groups
                 for column, value in group["sums"].items()
             }
         else:
             values = {
-                "total" if len(columns) == 1 else column: data["sum"]
+                "total" if len(columns) == 1 else column: (
+                    data["sum"],
+                    locations_for(column, None, source, aggregate, rows, row_locations),
+                )
                 for column, data in columns.items()
             }
-        for key, value in values.items():
+        for key, (value, locations) in values.items():
             numbers[key], units[key], locators[key] = value, aggregate["unit"], locations
         ratio = aggregate.get("ratio")
         if ratio and ratio["value"] is not None:
+            ratio_columns = aggregate["policy"]["ratio"].values()
+            ratio_locations = [
+                locations_for(column, None, source, aggregate, rows, row_locations)
+                for column in ratio_columns
+            ]
+            locations = (
+                list(dict.fromkeys(key for part in ratio_locations for key in part))
+                if all(ratio_locations)
+                else []
+            )
             numbers["비율"], units["비율"], locators["비율"] = ratio["value"], "비율", locations
     return numbers, units, locators
 
@@ -292,6 +414,9 @@ def observe(case, conn, home, run, source_map, evidence_path, cache, elapsed):
         numbers, units, locations = {}, {}, {}
     checked = [step for step in steps if step["state"] == "succeeded" and step["validation_json"]]
     executed = [step for step in steps if step["claimed_at"] is not None]
+    cache_observation = db.get_value(
+        conn, "cache_observation:" + run["id"], {"lookups": 0, "hits": 0}
+    )
     adapter = Observation(
         id=case.id + "-C-" + cache,
         case_id=case.id,
@@ -313,7 +438,9 @@ def observe(case, conn, home, run, source_map, evidence_path, cache, elapsed):
         coverage={},
         effects=sorted({step["effect"] for step in executed}),
         missing_input=run["state"] == "awaiting_input",
-        outcome=run["error_code"] or run["state"],
+        outcome=run["state"]
+        if run["state"] == "awaiting_input"
+        else run["error_code"] or run["state"],
         todos=[
             {
                 "id": step["spec_json"]["todo"]["id"],
@@ -331,10 +458,11 @@ def observe(case, conn, home, run, source_map, evidence_path, cache, elapsed):
         ],
         calls=[],
         latency_ms=elapsed,
-        cache_lookups=0,
-        cache_hits=0,
+        cache_lookups=cache_observation["lookups"],
+        cache_hits=cache_observation["hits"],
         repair_scope=[],
         numeric_verified=bool(numbers)
+        and all(locations.values())
         and any(
             "numeric_grounding" in step["spec_json"]["todo"]["verify_with"] for step in checked
         ),
@@ -342,6 +470,7 @@ def observe(case, conn, home, run, source_map, evidence_path, cache, elapsed):
         and all(proof["unchanged"] for proof in source_proofs),
         effect_verified=all(step["effect"] in {"read", "draft"} for step in executed),
         output_verified=run["state"] == "succeeded" and bool(result_proofs),
+        published_output_count=len(result_proofs),
     )
     write_json(
         evidence_path,
@@ -359,7 +488,12 @@ def observe(case, conn, home, run, source_map, evidence_path, cache, elapsed):
             "model_calls": 0,
             "network_clients_created": 0,
             "semantic_gold_annotations": "unverified",
-            "cache_instrumentation": "not_available; reported counters are no observations",
+            "numeric_locator_observation": {
+                "complete": bool(locations) and all(locations.values()),
+                "unresolved_keys": [key for key, value in locations.items() if not value],
+            },
+            "cache_instrumentation": "completed checks and reused values observed by the product",
+            "cache_observation": cache_observation,
         },
     )
     return adapter

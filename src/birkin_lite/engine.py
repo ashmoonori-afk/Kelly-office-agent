@@ -853,7 +853,13 @@ def complete_model_todo(
 ):
     """Keep generation's role; its one remaining call is a repair or required H review."""
     # These imports close the existing engine/tools/routing cycle at execution time.
-    from .context import _safe, build_model_request, cache_get, response_cache_key
+    from .context import (
+        _safe,
+        build_model_request,
+        cache_get,
+        record_cache_lookup,
+        response_cache_key,
+    )
     from .db import get_task_spec
     from .providers import metered_complete
     from .routing import choose_evaluation_model, choose_model
@@ -946,7 +952,9 @@ def complete_model_todo(
                 source_versions=versions,
                 now=context.get("now", datetime.now(UTC)).isoformat(),
             )
-            if cached is not None and not needs_semantic_review(cached, model_context):
+            reused = cached is not None and not needs_semantic_review(cached, model_context)
+            record_cache_lookup(conn, run["id"], hit=reused)
+            if reused:
                 set_value(conn, "cache_hit:" + run["id"] + ":" + todo.id, {"key": key})
                 return cached
         purpose = (

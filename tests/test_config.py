@@ -267,6 +267,72 @@ def test_valid_report_qualifies_binding_but_privacy_still_blocks_cloud(tmp_path)
     assert error.value.code == "POLICY_DENIED"
 
 
+@pytest.mark.parametrize(
+    "change,expected",
+    [
+        (None, "verified"),
+        ("missing-planning", "insufficient_coverage"),
+        ("missing-review", "insufficient_coverage"),
+        ("missing-content", "insufficient_coverage"),
+        ("nineteen", "insufficient_coverage"),
+        ("L-planning", "invalid_report"),
+        ("M-review", "invalid_report"),
+    ],
+)
+def test_qualification_covers_only_executable_role_task_pairs(tmp_path, change, expected):
+    content = [
+        "summarize",
+        "report_prose",
+        "meeting_actions",
+        "draft_reply",
+        "search_answer",
+        "analyze",
+    ]
+    selected = profile(
+        roles=["L", "M", "H"],
+        capabilities=["structured_output", "planning", "semantic_review", *content],
+    )
+    value = AppConfig(project_ids=["sales"], models=[selected])
+    report = evidence(tmp_path, selected).model_dump()
+    template, cases = report["cases"][0], []
+    for role in ("L", "M", "H"):
+        tasks = content + (["planning"] if role != "L" else [])
+        tasks += ["semantic_review"] if role == "H" else []
+        for index in range(20):
+            cases.append(
+                {
+                    **template,
+                    "case_id": f"{role}-{index}",
+                    "request_id": f"request-{role}-{index}",
+                    "fixture_sha256": hashlib.sha256(
+                        f"fixture-{role}-{index}".encode()
+                    ).hexdigest(),
+                    "role": role,
+                    "task": tasks[index % len(tasks)],
+                }
+            )
+    if change in {"missing-planning", "missing-review", "missing-content"}:
+        role, task = {
+            "missing-planning": ("M", "planning"),
+            "missing-review": ("H", "semantic_review"),
+            "missing-content": ("L", "analyze"),
+        }[change]
+        for case in cases:
+            if (case["role"], case["task"]) == (role, task):
+                case["task"] = "summarize"
+    elif change == "nineteen":
+        cases.pop(0)
+    elif change == "L-planning":
+        cases[0]["task"] = "planning"
+    elif change == "M-review":
+        cases[20]["task"] = "semantic_review"
+    report["cases"] = cases
+    data = canonical_json(report).encode()
+    (tmp_path / "evaluations" / "eval1.json").write_bytes(data)
+    selected.quality_evidence_sha256 = hashlib.sha256(data).hexdigest()
+    assert resolve(value, tmp_path / "config.json").statuses[0].qualification == expected
+
+
 def test_discovery_failure_never_exposes_credentials(tmp_path):
     def unavailable():
         raise OSError("SYNTHETIC_SECRET_REQUEST_AUTHORIZATION")

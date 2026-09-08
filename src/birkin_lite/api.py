@@ -200,6 +200,8 @@ def _public_call(row):
             for key in (
                 "id",
                 "step_id",
+                "logical_call_no",
+                "transport_attempt_no",
                 "provider",
                 "model_id",
                 "purpose",
@@ -209,10 +211,53 @@ def _public_call(row):
                 "output_tokens_total",
                 "reasoning_tokens",
                 "usage_basis",
+                "actual_micro_usd",
             )
         },
         "role": row["route_json"].get("role"),
         "reasoning_effort": row["route_json"].get("reasoning_effort"),
+        "price_stale": row["price_snapshot_json"].get("stale", True),
+    }
+
+
+def _public_automation_observation(conn, run):
+    if run["automation_id"] is None:
+        return None
+    event = conn.execute(
+        "SELECT event_key FROM inbox_events WHERE source='automation' "
+        "AND run_id=? AND actor_id=? AND connection_id=?",
+        (run["id"], run["actor_id"], run["automation_id"]),
+    ).fetchone()
+    if event is None:
+        return None
+    value = db.get_value(
+        conn, "automation_observation:" + run["automation_id"] + ":" + event["event_key"]
+    )
+    if not isinstance(value, dict) or any(
+        value.get(key) != expected
+        for key, expected in {
+            "schema_version": 1,
+            "actor_id": run["actor_id"],
+            "project_id": run["project_id"],
+            "automation_id": run["automation_id"],
+            "event_key": event["event_key"],
+        }.items()
+    ):
+        return None
+    return {
+        key: value.get(key)
+        for key in (
+            "schema_version",
+            "scheduled_utc",
+            "event_received_at",
+            "started_at",
+            "previous_tick_at",
+            "tick_at",
+            "observed_at",
+            "clock_rollback",
+            "scheduled_daemon_state",
+            "pc_power_state",
+        )
     }
 
 
@@ -544,6 +589,7 @@ def create_app(
             spec = db.get_task_spec(conn, run_id, actor)
             return {
                 "run": run,
+                "automation_observation": _public_automation_observation(conn, run),
                 "task_spec": spec.model_dump() if spec else None,
                 "steps": [
                     db.row_dict(row)
