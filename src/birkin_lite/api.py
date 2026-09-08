@@ -94,7 +94,7 @@ class SettingsPatch(StrictModel):
 
 
 class SecretInput(StrictModel):
-    provider: Literal["xai", "telegram"]
+    provider: Literal["xai", "telegram", "commandcode"]
     value: SecretStr
 
 
@@ -818,6 +818,7 @@ def create_app(
             "model_status": catalog["statuses"],
             "key_present": config.read_xai_key(home) is not None,
             "telegram_key_present": config.read_telegram_token(home) is not None,
+            "commandcode_key_present": config.read_commandcode_key(home) is not None,
             "telegram_connection": public_connection,
             "capabilities": {
                 "inputs": list(artifacts.MEDIA),
@@ -864,12 +865,17 @@ def create_app(
     @app.post("/api/secrets")
     async def secret(request: Request):
         body = await _body(request, SecretInput)
-        env = "XAI_API_KEY" if body.provider == "xai" else "TELEGRAM_BOT_TOKEN"
+        env = {
+            "xai": "XAI_API_KEY",
+            "telegram": "TELEGRAM_BOT_TOKEN",
+            "commandcode": "COMMAND_CODE_API_KEY",
+        }[body.provider]
         if os.environ.get(env, "").strip():
             raise AppError("SECRET_ENV_ACTIVE", status=409)
         async with settings_lock:
             await asyncio.to_thread(config.store_secret, home, body.provider, body.value)
-            await refresh()
+            if body.provider != "commandcode":
+                await refresh()
         return {"provider": body.provider, "stored": bool(body.value.get_secret_value().strip())}
 
     @app.post("/api/settings/check-models")

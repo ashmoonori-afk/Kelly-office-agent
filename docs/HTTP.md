@@ -56,9 +56,9 @@ AutomationConfig는 automation.py의 strict 계약이다. `name,project_id,recip
 
 ## 설정·기억·사용량
 
-- GET `/api/settings`: `{config,revision,model_status,key_present,telegram_key_present,telegram_connection,capabilities}`. config는 일반 설정이며 키를 포함하지 않는다. 현재 모델 가용성/품질 자격 미확인은 그대로 표시한다.
+- GET `/api/settings`: `{config,revision,model_status,key_present,telegram_key_present,commandcode_key_present,telegram_connection,capabilities}`. config는 일반 설정이며 키를 포함하지 않는다. 현재 모델 가용성/품질 자격 미확인은 그대로 표시한다.
 - PATCH `/api/settings`: `{expected_revision,models?,privacy?,telegram?}`. server home/actor/project 범위를 이 API로 변경하지 않는다. 모델 profile·privacy·TelegramConfig는 config.py의 strict 계약이며 설정 revision으로 낙관적 잠금을 적용한다.
-- POST `/api/secrets`: `{provider:"xai"|"telegram",value}`. 사용자에게 확인받은 키만 보호된 로컬 저장소에 기록하고 값은 반환하지 않는다. 빈 값으로 명시 삭제할 수 있다. 설정·로그·모델 문맥에는 키를 기록하지 않는다.
+- POST `/api/secrets`: `{provider:"xai"|"telegram"|"commandcode",value}`. 사용자에게 확인받은 키만 보호된 로컬 저장소에 기록하고 값은 반환하지 않는다. 빈 값으로 명시 삭제할 수 있다. 설정·로그·모델 문맥에는 키를 기록하지 않는다. Command Code는 키 보관만 지원하며 저장 시 모델 조회나 runtime 갱신을 수행하지 않는다. 해당 공급자의 환경변수가 설정돼 있으면 `SECRET_ENV_ACTIVE`로 저장·삭제를 거부한다.
 - POST `/api/settings/check-models`: `{}`. 계정 모델 목록만 조회한다. 생성/유료 품질 평가를 자동 실행하지 않는다.
 - GET `/api/usage?project_id=...`: `{today,month,runs}`. provider actual/estimated/unknown과 캐시/재시도 내역을 구분한다. 가격/잔액은 TODO 모델 선택에 전달하지 않는다.
 - GET `/api/memories?project_id=...&query=...`: `{memories}`.

@@ -13,7 +13,7 @@ from birkin_lite.automation import (
     record_daemon_observation,
     tick_automations,
 )
-from birkin_lite.config import AppConfig, create_config, load_config
+from birkin_lite.config import AppConfig, create_config, load_config, stored_secret
 from birkin_lite.contracts import (
     SAFE_MESSAGES,
     ActionProposal,
@@ -37,6 +37,7 @@ REQUEST = {"request": "업무 내용을 정리해 주세요", "project_id": "sal
 def local_api(tmp_path, monkeypatch):
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("COMMAND_CODE_API_KEY", raising=False)
     path = tmp_path / "config.json"
     create_config(path, AppConfig(home="data", project_ids=["sales"]))
     app = create_app(path, start_background=False)
@@ -597,6 +598,36 @@ def test_settings_are_revisioned_and_cannot_change_identity_or_expose_keys(local
     error(client.patch("/api/settings", json=patch, headers=headers), 409, "CONFLICT")
     saved = load_config(path)
     assert saved.actor_id == "owner" and saved.project_ids == ["sales"] and saved.home == "data"
+
+
+def test_commandcode_secret_save_status_delete_without_catalog_refresh(local_api, monkeypatch):
+    client, app, path = local_api
+    headers = authenticate(client, app)
+    initial = client.get("/api/settings").json()
+    assert initial["commandcode_key_present"] is False
+    app.state.catalog = {"statuses": initial["model_status"]}
+    catalog = app.state.catalog
+    secret = "SYNTHETIC_COMMANDCODE_KEY_NO_REMOTE_USE"
+    body = {"provider": "commandcode", "value": secret}
+    saved = client.post("/api/secrets", json=body, headers=headers)
+    assert saved.status_code == 200
+    assert saved.json() == {"provider": "commandcode", "stored": True}
+    home = path.parent / "data"
+    assert stored_secret(home, "commandcode").get_secret_value() == secret
+    status = client.get("/api/settings")
+    assert status.json()["commandcode_key_present"] is True
+    assert status.json()["config"] == initial["config"]
+    assert app.state.catalog is catalog
+    assert secret not in status.text and secret not in saved.text
+    monkeypatch.setenv("COMMAND_CODE_API_KEY", "SYNTHETIC_ENV_KEY")
+    error(client.post("/api/secrets", json=body, headers=headers), 409, "SECRET_ENV_ACTIVE")
+    assert stored_secret(home, "commandcode").get_secret_value() == secret
+    monkeypatch.delenv("COMMAND_CODE_API_KEY")
+    deleted = client.post("/api/secrets", json={**body, "value": ""}, headers=headers)
+    assert deleted.status_code == 200 and deleted.json()["stored"] is False
+    assert client.get("/api/settings").json()["commandcode_key_present"] is False
+    assert stored_secret(home, "commandcode") is None
+    assert app.state.catalog is catalog
 
 
 def test_paths_and_provider_key_inputs_do_not_leak_in_error_responses(local_api):

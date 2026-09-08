@@ -595,6 +595,7 @@
           <label for="secret-provider">키 종류</label
           ><select id="secret-provider">
             <option value="xai">xAI API 키</option>
+            <option value="commandcode">Command Code API 키</option>
             <option value="telegram">Telegram Bot 토큰</option></select
           ><label for="secret-value">API 키</label
           ><input
@@ -609,6 +610,9 @@
           <p class="field-note">
             값을 비우고 저장하면 선택한 키를 삭제합니다. 키는 일반 설정과
             분리하며 저장 요청 후 입력란을 비웁니다.
+          </p>
+          <p class="field-note">
+            Command Code는 키 저장만 지원하며 모델 연결은 미설정입니다.
           </p>
           <button type="submit" class="primary">키 저장 또는 삭제</button>
         </form>

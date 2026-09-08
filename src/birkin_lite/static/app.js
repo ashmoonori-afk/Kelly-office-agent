@@ -1491,6 +1491,8 @@ function keyStatus(data) {
     "key-state",
     "xAI 키: " +
       (data.key_present ? "등록됨" : "없음") +
+      " · Command Code 키: " +
+      (data.commandcode_key_present ? "등록됨" : "없음") +
       " · Telegram 토큰: " +
       (data.telegram_key_present ? "등록됨" : "없음"),
   );

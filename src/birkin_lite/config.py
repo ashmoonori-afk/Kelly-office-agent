@@ -263,7 +263,7 @@ def _crypt_secret(data, *, protect):
 
 
 def stored_secret(home, provider):
-    if provider not in {"xai", "telegram", "bootstrap"}:
+    if provider not in {"xai", "telegram", "bootstrap", "commandcode"}:
         raise AppError("INVALID_INPUT")
     path = Path(home).absolute() / "auth" / (provider + ".dpapi")
     if not path.exists():
@@ -285,7 +285,9 @@ def stored_secret(home, provider):
 
 def store_secret(home, provider, value: SecretStr):
     """Explicit local-user save; plaintext never reaches a file, DB, config or log."""
-    if provider not in {"xai", "telegram", "bootstrap"} or not isinstance(value, SecretStr):
+    if provider not in {"xai", "telegram", "bootstrap", "commandcode"} or not isinstance(
+        value, SecretStr
+    ):
         raise AppError("INVALID_INPUT")
     plain = value.get_secret_value().strip()
     if plain:
@@ -337,6 +339,15 @@ def read_xai_key(home=None) -> SecretStr | None:
         return None
     value = value.strip()
     _validate_secret(value, "xai")
+    return SecretStr(value)
+
+
+def read_commandcode_key(home=None) -> SecretStr | None:
+    value = _secret_value(home, "commandcode", "COMMAND_CODE_API_KEY")
+    if value is None or not value.strip():
+        return None
+    value = value.strip()
+    _validate_secret(value, "commandcode")
     return SecretStr(value)
 
 

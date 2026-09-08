@@ -16,6 +16,7 @@ from birkin_lite.config import (
     home_path,
     load_config,
     probe_binding,
+    read_commandcode_key,
     read_telegram_token,
     read_xai_key,
     resolve_catalog,
@@ -366,7 +367,7 @@ def test_explicit_probe_can_precede_qualification_without_enabling_normal_routin
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Actual current-user Windows DPAPI")
-@pytest.mark.parametrize("provider", ["xai", "telegram", "bootstrap"])
+@pytest.mark.parametrize("provider", ["xai", "telegram", "bootstrap", "commandcode"])
 def test_dpapi_roundtrip_replace_delete_never_writes_plaintext(
     tmp_path, monkeypatch, caplog, provider
 ):
@@ -413,7 +414,7 @@ def test_dpapi_tampered_ciphertext_is_rejected_without_secret_echo(tmp_path, mon
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Actual current-user Windows DPAPI")
-@pytest.mark.parametrize("target", ["telegram", "bootstrap"])
+@pytest.mark.parametrize("target", ["telegram", "bootstrap", "commandcode"])
 def test_dpapi_ciphertext_cannot_be_copied_to_another_secret_slot(tmp_path, target):
     plain = "123456:" + "synthetic-cross-slot-key-" * 2
     store_secret(tmp_path, "xai", SecretStr(plain))
@@ -429,7 +430,11 @@ def test_dpapi_ciphertext_cannot_be_copied_to_another_secret_slot(tmp_path, targ
 @pytest.mark.skipif(os.name != "nt", reason="Actual current-user Windows DPAPI")
 @pytest.mark.parametrize(
     ("provider", "environment", "reader"),
-    [("xai", "XAI_API_KEY", read_xai_key), ("telegram", "TELEGRAM_BOT_TOKEN", read_telegram_token)],
+    [
+        ("xai", "XAI_API_KEY", read_xai_key),
+        ("telegram", "TELEGRAM_BOT_TOKEN", read_telegram_token),
+        ("commandcode", "COMMAND_CODE_API_KEY", read_commandcode_key),
+    ],
 )
 def test_dpapi_env_priority_and_empty_env_fallback(
     tmp_path, monkeypatch, provider, environment, reader
