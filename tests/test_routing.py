@@ -322,6 +322,78 @@ def test_requested_cross_currency_total_requires_input_without_any_tool(currenci
     assert plan.requirements[0].text == text
 
 
+@pytest.mark.parametrize(
+    "acceptance",
+    [
+        "금액 합계 검증 후 결과표 저장",
+        "금액 집계를 검증한 후 결과 파일로 저장해 주세요.",
+        "금액 합산 검증 후 결과파일 저장",
+    ],
+)
+def test_aggregate_input_correction_preserves_existing_verification_and_publication(acceptance):
+    request = RunRequest(
+        request="표 합계 내줘", project_id="sales", artifact_ids=["source-1"], output_format="xlsx"
+    )
+    task = TaskSpec(
+        intent="aggregate",
+        source_ids=["source-1"],
+        inputs={"value_columns": ["금액"]},
+        acceptance=[acceptance],
+    )
+    source = {
+        "artifact_id": "source-1",
+        "format": "csv",
+        "headers_valid": True,
+        "headers": ["항목", "금액"],
+        "sheet": None,
+    }
+    original = task.model_dump()
+    plan = expand_recipe(request, [source], task)
+    assert plan is not None and all(step.kind == "mechanical" for step in plan.todos)
+    assert [step.executor.tool_name for step in plan.todos] == [
+        "table.aggregate",
+        "document.create",
+        "artifact.validate",
+        "artifact.publish",
+    ]
+    assert "numeric_grounding" in plan.todos[0].verify_with
+    assert plan.todos[2].id in plan.todos[3].depends_on
+    assert plan.todos[0].executor.args["value_columns"] == ["금액"]
+    assert acceptance in plan.todos[0].done_when
+    assert any(item.text == acceptance for item in plan.requirements)
+    assert task.model_dump() == original
+
+
+@pytest.mark.parametrize(
+    "acceptance",
+    [
+        "금액 합계 검증 후 결과표 저장. 해외 행은 제외해 주세요.",
+        "금액 합계 검증 후 고객에게 결과표 저장",
+        "금액 합계 검증 후 결과표 저장하고 원본을 덮어써 주세요.",
+        "금액 합계 검증 없이 결과표 저장",
+        "금액 합계 개인정보 검증 후 결과표 저장",
+    ],
+)
+def test_aggregate_input_correction_does_not_erase_extra_actions_or_verification(acceptance):
+    request = RunRequest(
+        request="표 합계 내줘", project_id="sales", artifact_ids=["source-1"], output_format="xlsx"
+    )
+    task = TaskSpec(
+        intent="aggregate",
+        source_ids=["source-1"],
+        inputs={"value_columns": ["금액"]},
+        acceptance=[acceptance],
+    )
+    source = {
+        "artifact_id": "source-1",
+        "format": "csv",
+        "headers_valid": True,
+        "headers": ["항목", "금액"],
+        "sheet": None,
+    }
+    assert expand_recipe(request, [source], task) is None
+
+
 @pytest.mark.parametrize("case", CASES["cases"], ids=lambda case: case["id"])
 def test_spec_routing_cases_use_actual_normalization_and_binding(case):
     data = {**CASES["defaults"], **case["input"]}

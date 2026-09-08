@@ -494,7 +494,19 @@ def _confirmed_aggregate_text(text, sources, inputs, output_format, request_text
         return re.escape(re.sub(r"\s+", "", value))
 
     columns = "(?:" + "|".join(literal(name) for name in args.value_columns) + ")"
-    rules = [(r"(?:환불)?음수를포함해", ""), (r"수식결과가확정되지않으면합계를중단해", "합계")]
+    rules = [
+        (r"(?:환불)?음수를포함해", ""),
+        (r"수식결과가확정되지않으면합계를중단해", "합계"),
+        # Aggregate recipes already verify the sum, then validate and publish a new file.
+        # Only this final sequence is redundant; other destinations or actions remain.
+        (
+            (
+                r"(합계|합산|집계)(?:를)?검증(?:한)?후결과(?:표|파일)(?:로|을)?저장"
+                r"(?=(?:해(?:주세요|줘)?)?[.!?]*$)"
+            ),
+            r"\1",
+        ),
+    ]
     if source.get("format") == "csv" and policy.thousands_separator == ",":
         rules.append((r"따옴표로감싼천단위", ""))
     if args.sheet:
