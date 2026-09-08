@@ -24,6 +24,7 @@ def environment():
         "PATHEXT",
         "USERPROFILE",
         "LOCALAPPDATA",
+        "UV_CACHE_DIR",
     )
     value = {key: os.environ[key] for key in names if key in os.environ}
     value.update(PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
