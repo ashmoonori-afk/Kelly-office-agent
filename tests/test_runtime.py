@@ -15,7 +15,19 @@ from birkin_lite.contracts import AppError, PlanV1, RunRequest, TaskSpec, canoni
 from birkin_lite.runtime import Runtime
 
 TEXT = "동료에게 짧은 인사말 작성"
-CANDIDATE = {"sections": {"content": {"paragraphs": ["함께 좋은 하루를 시작해요."]}}}
+CANDIDATE = {
+    "sections": {
+        "content": {"paragraphs": [[{"claim_id": "c1"}]]},
+        "claims": [
+            {
+                "id": "c1",
+                "text": "함께 좋은 하루를 시작해요.",
+                "kind": "inference",
+                "evidence_ids": [],
+            }
+        ],
+    }
+}
 REVIEW = {"validation": {"status": "pass", "checked_layers": ["semantic_review"]}}
 
 

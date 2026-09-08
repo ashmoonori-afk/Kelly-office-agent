@@ -204,3 +204,24 @@ python -m evals.live annotate --case summary-01 --ledger .birkin-lite/live-evalu
 `automation-12.scenario.expected.error`를 `PATH_DENIED`에서 `POLICY_DENIED`로 정정했다. 근거는 제품의 [오류 계약](../src/birkin_lite/contracts.py)에 정의된 오류 명칭이다. `PATH_DENIED`는 해당 오류 계약에 없다. 권한 차단 요구, 허용 범위 밖 자료 읽기 0회, 업무 생성 0회는 그대로이며 제품 동작이나 다른 정답 기준은 바꾸지 않았다. 관측 결과에 맞춰 품질 기준을 완화한 변경이 아닌 오류 분류와의 정합성 정정이다.
 
 corpus와 protocol 버전은 `birkin-eval-v1.1`이다. 기존 `p12-automation-v2`의 19/20 일치 관측은 원본 그대로 보존한다. 새 버전은 condition fingerprint가 달라지므로 기존 v1 관측을 재사용하거나 새 실행으로 재분류하지 않는다. 새 버전 평가는 별도 작업 폴더에서 다시 실행한다.
+
+## 2026-09-08 숫자 근거 라벨 정정: corpus/protocol v1.2
+
+현재 버전은 `birkin-eval-v1.2`이다. `table-04·06·08·20`의 6개 숫자 key에서 `gold.numeric_locators`만 직접 기여 행의 최소 집합으로 정정했다. 기준은 **선택 범위·그룹·정책을 적용한 뒤 해당 숫자를 만드는 유효한 값 행**이다. 선택 헤더는 열/그룹의 의미를 확인하는 추가 지원 근거로 허용하며, 기존 scorer의 `gold ⊆ actual ⊆ 등록된 원문 위치` 조건은 바꾸지 않았다. 제외된 행을 숫자 기여 행에 포함시키던 라벨과 실제 기여 근거 계약의 불일치를 고친 것이다.
+
+| 사례 / 숫자 key | 고정 원문과 조건에서 도출한 근거 | 정정된 필수 locator |
+|---|---|---|
+| table-04 / 영업 | `팀=영업`: L2의 300 + L4의 200 = 500원 | `s1:L2`, `s1:L4` |
+| table-04 / 운영 | `팀=운영`: L3의 700 = 700원 | `s1:L3` |
+| table-06 / total | `blank_policy=skip`: L2의 3000 + L4의 2000 = 5000원; L3은 빈 금액 | `s1:L2`, `s1:L4` |
+| table-08 / total | `mixed_policy=skip`: L2의 600 + L4의 900 = 1500원; L3은 `미정` | `s1:L2`, `s1:L4` |
+| table-20 / 2026-09-01 | 날짜 문자열을 그대로 구분: L2의 2 + L4의 4 = 6개 | `s1:L2`, `s1:L4` |
+| table-20 / 2026/09/01 | 슬래시 날짜 문자열과 일치하는 L3의 3 = 3개 | `s1:L3` |
+
+숫자·단위·요청·원문/fixture·TaskSpec 입력 조건·required_assertions·허용/금지 사실 및 그 밖의 gold는 그대로다. table-06·08의 제외 행 L3은 삭제할 업무 근거가 아니며, 기존 제외 요구와 집계 원장의 skip 정책·blank/invalid count에 남는다. table-20의 날짜 미통합 요구도 유지한다. table-11·12·14는 actual에 헤더만 추가돼 원래 scorer 조건을 만족하므로 변경하지 않았다. 이 세 사례의 exact-locator 진단 차이를 숫자 scorer 실패로 해석하면 안 된다.
+
+v1.1 원본은 Git `b9d8466`에 보존한다. corpus의 SHA256(LF 기준)은 `dbb1073fffa07647ad4522049fa733614d8a07a1b91db8082ad815698529e6c7` → `cb9e7eab24dc23fca3038fcc6678c384ef78552aebe7fd484401c55186ee741e`이다. 정정 시 Windows CRLF 파일의 SHA256은 `3a0665990a1e65bd8bdc31880420c47a0ff24e3f4c8986789e2ebe22f5b557ae` → `0881392220d700c191301363588973f70f4d863bcf128bed95fee4cde7af36a2`이다. `evals/run.py`는 protocol version 한 줄만 바뀌었으며 SHA256은 `7fc83380d668706699013505154f3054b8af9e3168f183f7730f706b79c8ee6b` → `4ab3f57f117e23cba3e0193ea705008cda24a01729f24ae968daacb9cbfd1c19`이다.
+
+프로토콜 버전 변경으로 모든 condition fingerprint가 달라져 기존 v1.1 관측을 v1.2로 재사용할 수 없다. 옛 원장이나 출력에 새 hash/라벨을 덮어써 새 실행처럼 만들지 않는다. 이번 정정은 고정 fixture에 근거한 라벨 정합성 수정이며, 실제 계산 품질 개선이나 새 20건 통과 결과가 아니다. 여기서는 corpus validator와 순수 scorer 계약만 검증하고, v1.2 업무 실행은 별도 작업 폴더에서 수행한다.
+
+후속 검증에서는 위 4개 사례를 코드가 고정된 새 환경에서 C/cold로 실행했다. 실제 결과 파일을 재열어 숫자·단위·숫자 근거 위치·출처·출력 검사를 4/4 통과했고 모델 호출은 0회였다. 의미상 요구 coverage와 사람의 채택 평가는 채우지 않았으므로 전체 품질 통과나 토큰 절감률의 증거로 사용하지 않는다.

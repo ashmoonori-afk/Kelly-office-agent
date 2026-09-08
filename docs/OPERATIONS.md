@@ -15,7 +15,9 @@ kelly startup disable --config .\config.json
 
 `enable`은 **다음 로그인부터** 현재 가상환경의 `pythonw.exe`로 Kelly를 창 없이 시작한다. 현재 사용자의 로그인 트리거와 일반 권한을 사용하며, 관리자 권한·암호 저장·즉시 실행은 요청하지 않는다. 작업 이름은 `KellyOfficeAgent-<home 해시>`이고 명령 결과에 표시된다. 같은 home의 중복 서버는 기존 OS 잠금이 막는다. 등록할 이름에 다른 소유자나 실행 내용의 작업이 있으면 덮어쓰지 않는다. [Microsoft 로그인 트리거](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasktrigger?view=windowsserver2025-ps), [작업 실행 계정과 권한](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtaskprincipal?view=windowsserver2025-ps)
 
-숨김 실행 로그는 데이터 home의 `logs/server.stdout.log`, `logs/server.stderr.log`에 추가된다. 접속 코드 자체는 로그에 남기지 않는다. 브라우저 연결이 필요하면 별도 터미널에서 `kelly serve --config .\config.json --access-code`를 실행하고 표시된 코드를 로컬 화면에 입력한다. 로그 삭제·별도 보관은 서버가 정상 종료된 뒤 한다.
+숨김 실행 로그는 데이터 home의 `logs/server.stdout.YYYY-MM-DD.log`, `logs/server.stderr.YYYY-MM-DD.log`에 UTF-8로 추가된다. 날짜는 UTC이며, 쓰기 시점과 분당 유지보수에서 날짜가 바뀌면 새 파일로 회전하므로 서버를 계속 켜 두어도 적용된다. 접속 코드 자체는 로그에 남기지 않는다. 브라우저 연결이 필요하면 별도 터미널에서 `kelly serve --config .\config.json --access-code`를 실행하고 표시된 코드를 로컬 화면에 입력한다.
+
+일별 파일은 해당 UTC 날짜가 끝난 뒤 30일이 지나고 마지막 수정 시각도 30일보다 오래됐을 때 정리한다. 예전 `server.stdout.log`·`server.stderr.log`는 마지막 수정 시각만으로 같은 30일 기준을 적용한다. 현재 기록 중이거나 다른 프로그램이 열어 둔 파일, 링크·junction·hardlink, 다른 이름·폴더는 삭제하지 않는다. 읽기 전용이거나 잠긴 파일은 다음 분에 다시 확인한다. 시계가 이전 관측 시각보다 뒤로 움직이면 회전·삭제를 보류하고 기존 파일에 계속 기록한다. 시계가 회복된 뒤 다시 정리한다. 별도 보관하려면 서버를 정상 종료한 뒤 본 앱 로그 규칙과 다른 이름이나 폴더에 복사한다.
 
 `stop`은 로컬 접속 코드·세션·CSRF를 거쳐 서버에 종료를 요청하고 OS 잠금 반환을 확인한다. PID를 추정하거나 강제 종료하지 않는다. 종료가 35초 안에 확인되지 않으면 `unknown / shutdown_timeout`을 반환하므로 로그를 확인한다. `disable`은 다음 로그인 실행만 해제하며 이미 실행 중인 서버는 종료하지 않는다. 가상환경이나 설정 파일을 이동·제거하기 **전에** 기존 경로로 `disable`을 실행하고 필요하면 새 경로에서 다시 등록한다.
 

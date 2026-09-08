@@ -24,7 +24,12 @@ from birkin_lite.verification import (
     semantic_review_requested,
 )
 
-CANDIDATE = {"sections": {"content": {"paragraphs": ["함께 좋은 하루를 시작해요."]}}}
+CANDIDATE = {
+    "sections": {
+        "content": {"paragraphs": [[{"claim_id": "greeting"}]]},
+        "claims": [{"id": "greeting", "text": "함께 좋은 하루를 시작해요.", "kind": "inference"}],
+    }
+}
 REVIEW = {"validation": {"status": "pass", "checked_layers": ["semantic_review"]}}
 
 
@@ -198,9 +203,22 @@ def test_format_repair_does_not_open_a_third_review_call(tmp_path):
 @pytest.mark.parametrize(
     "candidate,error",
     [
-        ({"sections": {"content": {"paragraphs": ["999건 완료"]}}}, "NUMERIC_MISMATCH"),
         (
-            {"sections": {"content": {}, "claims": [{"id": "fact", "text": "확정 사실"}]}},
+            {
+                "sections": {
+                    "content": {"paragraphs": [[{"claim_id": "count"}]]},
+                    "claims": [{"id": "count", "text": "999건 완료", "kind": "inference"}],
+                }
+            },
+            "NUMERIC_MISMATCH",
+        ),
+        (
+            {
+                "sections": {
+                    "content": {"paragraphs": [[{"claim_id": "fact"}]]},
+                    "claims": [{"id": "fact", "text": "확정 사실"}],
+                }
+            },
             "MISSING_EVIDENCE",
         ),
     ],
@@ -248,9 +266,15 @@ def test_model_grounding_requires_bound_review_independently_of_dispatch():
 def test_h_review_cannot_certify_an_unexecuted_numeric_aggregate():
     candidate = {
         "sections": {
-            "content": {"paragraphs": ["합계는 999입니다."]},
+            "content": {"paragraphs": [[{"numeric_id": "sum"}]]},
             "numeric_claims": [
-                {"value": "999", "aggregate_step": "forged", "column": "매출", "unit": "KRW"}
+                {
+                    "id": "sum",
+                    "value": "999",
+                    "aggregate_step": "forged",
+                    "column": "매출",
+                    "unit": "KRW",
+                }
             ],
         }
     }

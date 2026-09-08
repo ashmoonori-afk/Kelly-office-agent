@@ -17,7 +17,7 @@ from birkin_lite.contracts import StrictModel, Usage
 CATEGORIES = ("table", "extraction", "summary", "multi_document", "conflict_missing", "automation")
 KINDS = ("mechanical", "simple", "standard", "complex")
 PROTOCOL = {
-    "version": "birkin-eval-v1.1",
+    "version": "birkin-eval-v1.2",
     "arms": {
         "A": "Content generation starts at H; deterministic tools remain unchanged.",
         "B": "Content starts at L, then M/H only after the same failed checks.",

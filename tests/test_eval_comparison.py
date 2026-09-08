@@ -24,7 +24,19 @@ from evals.execute import ACTOR
 from evals.run import Case, load_cases
 
 POLICY = PrivacyPolicy(project_id="eval", allowed_providers=["fixture"], local_only=True)
-CONTENT = {"sections": {"content": {"paragraphs": ["함께 좋은 하루를 시작해요."]}}}
+CONTENT = {
+    "sections": {
+        "content": {"paragraphs": [[{"claim_id": "greeting"}]]},
+        "claims": [
+            {
+                "id": "greeting",
+                "text": "함께 좋은 하루를 시작해요.",
+                "kind": "inference",
+                "evidence_ids": [],
+            }
+        ],
+    }
+}
 REVIEW = {"validation": {"status": "pass", "checked_layers": ["semantic_review"]}}
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
 

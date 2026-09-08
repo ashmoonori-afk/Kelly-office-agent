@@ -37,7 +37,7 @@ jobs:
         run: uv run --locked python -m pytest -q --junitxml=.birkin-lite/evidence/windows-tests.xml
       - name: Build wheel into the local cache
         run: uv build --wheel
-      - name: Isolated install, start, stop and uninstall
+      - name: Isolated install, restart, backup, restore and uninstall
         run: uv run --locked python scripts/check_install.py
       - name: Keep synthetic check evidence
         if: always()

@@ -54,6 +54,17 @@ def prices():
     )
 
 
+def narrative(text):
+    return {
+        "sections": {
+            "content": {"paragraphs": [[{"claim_id": "c1"}]]},
+            "claims": [{"id": "c1", "text": text, "kind": "inference", "evidence_ids": []}],
+            "numeric_claims": [],
+            "uncertainties": [],
+        }
+    }
+
+
 def test_engine_format_repair_records_both_paid_generations_without_escalation(tmp_path):
     conn, run, tools = setup(tmp_path)
     plan = PlanV1.model_validate(planned()["plan"])
@@ -63,18 +74,7 @@ def test_engine_format_repair_records_both_paid_generations_without_escalation(t
 
     def transport(request, selected):
         seen.append(selected.role)
-        return returned(
-            {"sections": "wrong shape"}
-            if len(seen) == 1
-            else {
-                "sections": {
-                    "content": {"paragraphs": ["검토 결과"]},
-                    "claims": [],
-                    "numeric_claims": [],
-                    "uncertainties": [],
-                }
-            }
-        )
+        return returned({"sections": "wrong shape"} if len(seen) == 1 else narrative("검토 결과"))
 
     completed = execute_next(
         conn,
@@ -141,11 +141,7 @@ def test_failed_later_todo_returns_previously_completed_content(tmp_path):
 
     def transport(*_):
         received.append(1)
-        return returned(
-            {"sections": {"content": {"paragraphs": ["완료한 부분"]}}}
-            if len(received) == 1
-            else {"sections": []}
-        )
+        return returned(narrative("완료한 부분") if len(received) == 1 else {"sections": []})
 
     complete = partial(
         complete_model_todo,
@@ -173,7 +169,7 @@ def test_empty_model_verifiers_cannot_bypass_numeric_check_and_repair_is_bounded
         seen.append(selected.role)
         if len(seen) == 2:
             assert "NUMERIC_MISMATCH" in request.context
-        return returned({"sections": {"content": {"paragraphs": ["근거 없는 숫자 999"]}}})
+        return returned(narrative("근거 없는 숫자 999"))
 
     complete = partial(
         complete_model_todo,
@@ -210,7 +206,7 @@ def test_new_conflict_reclassifies_only_unfinished_steps_and_preserves_paid_outp
 
     def transport(_request, selected):
         seen.append(selected.role)
-        return returned({"sections": {"content": {"paragraphs": ["검토 내용"]}}})
+        return returned(narrative("검토 내용"))
 
     def conflict_check(_output, context):
         attempts = conn.execute(
@@ -264,7 +260,7 @@ def test_verified_response_cache_reuses_output_without_a_new_provider_call(tmp_p
 
     def transport(*_):
         seen.append(1)
-        return returned({"sections": {"content": {"paragraphs": ["검토 내용"]}}})
+        return returned(narrative("검토 내용"))
 
     complete = partial(
         complete_model_todo,

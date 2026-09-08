@@ -190,7 +190,7 @@ def test_partial_evidence_does_not_become_a_full_document_summary():
     partial["t1"]["bounded_page"] = False
     complete = build_model_request(todo("summarize"), partial, {}, binding=binding())
     assert "근거" in complete.context
-    assert "title" in complete.output_schema["$defs"]["DocumentContent"]["properties"]
+    assert "title" in complete.output_schema["$defs"]["ReferenceContent"]["properties"]
     with pytest.raises(AppError) as error:
         build_model_request(
             todo(), {"t1": {"rows": [[1, 2]], "columns": ["a", "b"]}}, {}, binding=binding()

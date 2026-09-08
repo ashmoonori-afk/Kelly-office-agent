@@ -152,15 +152,16 @@ def test_folder_events_use_real_files_and_current_grants(corpus, tmp_path, case_
         assert next(iter(ledger["state"].values()))["last_error"] == "NOT_FOUND"
 
 
-def test_protocol_revision_rejects_previous_observation(corpus, tmp_path):
-    assert PROTOCOL["version"] == "birkin-eval-v1.1"
+@pytest.mark.parametrize("previous_version", ["birkin-eval-v1", "birkin-eval-v1.1"])
+def test_protocol_revision_rejects_previous_observation(corpus, tmp_path, previous_version):
+    assert PROTOCOL["version"] == "birkin-eval-v1.2"
     assert corpus["automation-12"].scenario["expected"]["error"] == "POLICY_DENIED"
     case = corpus["automation-01"]
     observed = execute_scenario(case, tmp_path / case.id)
     old = observed.model_dump()
     old["condition_hash"] = fingerprint(
         {
-            "protocol": PROTOCOL | {"version": "birkin-eval-v1"},
+            "protocol": PROTOCOL | {"version": previous_version},
             "case": case.model_dump(),
         }
     )

@@ -567,19 +567,56 @@ class Claim(StrictModel):
 
 
 class NumericClaim(StrictModel):
+    id: Id
     value: Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[+-]?\d+(?:\.\d+)?$")]
     aggregate_step: Id
     column: Annotated[str, Field(min_length=1, max_length=200)]
     group: Annotated[str, Field(max_length=500)] | None = None
     operation: Literal["sum", "average", "ratio"] = "sum"
     unit: Annotated[str, Field(min_length=1, max_length=64)]
+    denominator: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+
+
+class Uncertainty(StrictModel):
+    id: Id
+    text: ShortText
+    evidence_ids: list[Id] = Field(default_factory=list, max_length=6)
+
+
+class ClaimPart(StrictModel):
+    claim_id: Id
+
+
+class NumericPart(StrictModel):
+    numeric_id: Id
+
+
+class UncertaintyPart(StrictModel):
+    uncertainty_id: Id
+
+
+TextParts = Annotated[list[ClaimPart | NumericPart | UncertaintyPart], Field(max_length=100)]
+
+
+class ReferenceTable(StrictModel):
+    headers: list[TextParts] = Field(min_length=1, max_length=100)
+    rows: list[list[TextParts]] = Field(default_factory=list, max_length=2000)
+
+
+class ReferenceContent(StrictModel):
+    """Model layout contains references only; DocumentContent remains the tool contract."""
+
+    title: TextParts = Field(default_factory=list)
+    paragraphs: list[TextParts] = Field(default_factory=list, max_length=1000)
+    bullets: list[TextParts] = Field(default_factory=list, max_length=1000)
+    tables: list[ReferenceTable] = Field(default_factory=list, max_length=20)
 
 
 class Narrative(StrictModel):
-    content: DocumentContent
+    content: ReferenceContent
     claims: list[Claim] = Field(default_factory=list, max_length=100)
     numeric_claims: list[NumericClaim] = Field(default_factory=list, max_length=100)
-    uncertainties: list[ShortText] = Field(default_factory=list, max_length=20)
+    uncertainties: list[Uncertainty] = Field(default_factory=list, max_length=20)
 
 
 class ReportSectionsV1(StrictModel):
@@ -605,10 +642,12 @@ class MeetingActionsV1(StrictModel):
 
 
 class DraftReply(StrictModel):
-    subject: ShortText
-    body: Text
-    recipient: ShortText | None = None
+    subject: TextParts = Field(min_length=1)
+    body: TextParts = Field(min_length=1)
+    recipient: TextParts | None = Field(default=None, min_length=1)
     claims: list[Claim] = Field(default_factory=list, max_length=100)
+    numeric_claims: list[NumericClaim] = Field(default_factory=list, max_length=100)
+    uncertainties: list[Uncertainty] = Field(default_factory=list, max_length=20)
 
 
 class DraftReplyV1(StrictModel):
@@ -617,8 +656,10 @@ class DraftReplyV1(StrictModel):
 
 class SearchAnswer(StrictModel):
     found: bool
-    text: Text
+    text: TextParts = Field(min_length=1)
     claims: list[Claim] = Field(default_factory=list, max_length=100)
+    numeric_claims: list[NumericClaim] = Field(default_factory=list, max_length=100)
+    uncertainties: list[Uncertainty] = Field(default_factory=list, max_length=20)
 
 
 class SearchAnswerV1(StrictModel):

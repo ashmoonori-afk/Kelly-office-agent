@@ -5,16 +5,24 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from . import office
 from .artifacts import metadata, open_artifact
 from .contracts import (
     MODEL_OUTPUT_TYPES,
     AppError,
+    ClaimPart,
+    DocumentContent,
+    DraftReply,
     Evidence,
     ModelExecutor,
+    Narrative,
+    NumericPart,
+    SearchAnswer,
+    ShortText,
     StepInput,
+    Text,
     TodoV1,
     ToolExecutor,
     ValidationResult,
@@ -231,12 +239,99 @@ def _claim_refs(claims, evidences):
         raise AppError("INVALID_OUTPUT")
     refs = set()
     for claim in claims:
-        if claim.kind == "fact" and not claim.evidence_ids:
+        if getattr(claim, "kind", None) == "fact" and not claim.evidence_ids:
             raise AppError("MISSING_EVIDENCE")
         if not set(claim.evidence_ids) <= evidences.keys():
             raise AppError("EVIDENCE_MISMATCH")
         refs.update(claim.evidence_ids)
     return refs
+
+
+def render_content(value: Narrative | DraftReply | SearchAnswer) -> DocumentContent:
+    """Resolve model references, not evidence truth; the same renderer publishes the document."""
+    declarations = {}
+    for key, items in (
+        ("claim_id", value.claims),
+        ("numeric_id", value.numeric_claims),
+        ("uncertainty_id", value.uncertainties),
+    ):
+        for item in items:
+            if item.id in declarations:
+                raise AppError("INVALID_OUTPUT")
+            declarations[item.id] = (key, item)
+    used = set()
+
+    def text(parts):
+        result = []
+        for part in parts:
+            key, item_id = next(iter(part.model_dump().items()))
+            if item_id not in declarations or declarations[item_id][0] != key:
+                raise AppError("INVALID_OUTPUT")
+            used.add(item_id)
+            item = declarations[item_id][1]
+            if isinstance(part, ClaimPart):
+                result.append(item.text)
+            elif isinstance(part, NumericPart):
+                if (item.operation == "ratio") != (item.denominator is not None):
+                    raise AppError("NUMERIC_REFERENCE_INVALID")
+                # A value cannot be detached from its verified subject, operation or unit.
+                label = {"sum": "합계", "average": "평균", "ratio": "비율"}[item.operation]
+                subject = item.column
+                if item.denominator is not None:
+                    subject += "/" + item.denominator
+                if item.group is not None:
+                    subject = item.group + " · " + subject
+                result.append(f"{subject} {label}: {item.value} {item.unit}")
+            else:
+                result.append("미확정: " + item.text)
+        # Reference boundaries must not create new numbers (e.g. "10" + "0" -> "100").
+        return " ".join(result)
+
+    if isinstance(value, Narrative):
+        layout = value.content
+        content = DocumentContent(
+            title=text(layout.title),
+            paragraphs=[text(parts) for parts in layout.paragraphs],
+            bullets=[text(parts) for parts in layout.bullets],
+            tables=[
+                {
+                    "headers": [text(parts) for parts in table.headers],
+                    "rows": [[text(parts) for parts in row] for row in table.rows],
+                }
+                for table in layout.tables
+            ],
+        )
+    elif isinstance(value, DraftReply):
+        content = DocumentContent(
+            title=TypeAdapter(ShortText).validate_python(text(value.subject)),
+            paragraphs=[
+                "수신인: "
+                + (
+                    TypeAdapter(ShortText).validate_python(text(value.recipient))
+                    if value.recipient is not None
+                    else "미정"
+                ),
+                TypeAdapter(Text).validate_python(text(value.body)),
+            ],
+        )
+    elif isinstance(value, SearchAnswer):
+        if not value.found and (value.claims or value.numeric_claims):
+            raise AppError("INVALID_OUTPUT")
+        content = DocumentContent(
+            title="검색 결과" if value.found else "근거를 찾지 못했습니다",
+            paragraphs=[TypeAdapter(Text).validate_python(text(value.text))],
+        )
+    else:
+        raise AppError("INVALID_OUTPUT")
+    if used != declarations.keys():
+        raise AppError("INVALID_OUTPUT")
+    # Keep prose and headings readable while identifying interpretation as in the prior report
+    # renderer. These annotations now share the coverage and per-claim numeric checks.
+    rendered = content.model_dump()
+    rendered["paragraphs"].extend(
+        "해석: " + claim.text for claim in value.claims if claim.kind == "inference"
+    )
+    return DocumentContent.model_validate(rendered)
 
 
 def _absolute_dates(text):
@@ -359,11 +454,27 @@ def semantic_review_requested(context):
 
 def _model_fields(parsed, evidences, context, *, reviewed_refs=None):
     claims, numeric, rendered, refs, needs_review = [], [], None, set(), False
-    if hasattr(parsed, "sections"):
-        claims, numeric = parsed.sections.claims, parsed.sections.numeric_claims
-        rendered = parsed.sections.content.model_dump()
-        if evidences and not claims and not numeric and not parsed.sections.uncertainties:
+    content = next(
+        (getattr(parsed, key) for key in ("sections", "draft", "answer") if hasattr(parsed, key)),
+        None,
+    )
+    if content is not None:
+        claims, numeric = content.claims, content.numeric_claims
+        rendered = render_content(content).model_dump()
+        if evidences and not claims and not numeric and not content.uncertainties:
             raise AppError("MISSING_EVIDENCE")
+        if (
+            isinstance(content, SearchAnswer)
+            and content.found
+            and not any(claim.kind == "fact" for claim in claims)
+        ):
+            raise AppError("MISSING_EVIDENCE")
+        refs.update(_claim_refs([*claims, *content.uncertainties], evidences))
+        for item in [*claims, *content.uncertainties]:
+            # Each literal's own references support its numbers. Unused aggregates and other
+            # claims cannot lend a number to an unrelated entity, recipient or uncertainty.
+            if _numbers(item.text) - _source_numbers(evidences, item.evidence_ids, context):
+                raise AppError("NUMERIC_MISMATCH")
     elif hasattr(parsed, "actions"):
         try:
             refs = _meeting_refs(parsed.actions, evidences, reviewed_refs=reviewed_refs)
@@ -374,15 +485,6 @@ def _model_fields(parsed, evidences, context, *, reviewed_refs=None):
             refs = {ref for action in parsed.actions for ref in action.evidence_ids}
             needs_review = True
         rendered = [action.action for action in parsed.actions]
-    elif hasattr(parsed, "draft"):
-        claims = parsed.draft.claims
-        rendered = {"subject": parsed.draft.subject, "body": parsed.draft.body}
-    elif hasattr(parsed, "answer"):
-        claims, rendered = parsed.answer.claims, parsed.answer.text
-        if parsed.answer.found and not any(claim.kind == "fact" for claim in claims):
-            raise AppError("MISSING_EVIDENCE")
-        if not parsed.answer.found and claims:
-            raise AppError("INVALID_OUTPUT")
     else:
         if not context["inputs"]:
             raise AppError("MISSING_INPUT")
@@ -393,7 +495,6 @@ def _model_fields(parsed, evidences, context, *, reviewed_refs=None):
         ) <= evidences.keys():
             raise AppError("EVIDENCE_MISMATCH")
         refs.update(parsed.validation.evidence_refs)
-    refs.update(_claim_refs(claims, evidences))
     return numeric, rendered, refs, needs_review
 
 
@@ -418,12 +519,10 @@ def needs_semantic_review(output, context):
             return False
         parsed = model_type.model_validate(output)
         evidences = _supplied_evidence(context)
-        numeric, rendered, refs, meeting_review = _model_fields(parsed, evidences, context)
+        _numeric, rendered, refs, meeting_review = _model_fields(parsed, evidences, context)
         supported = _source_numbers(evidences, refs, context)
-        # This hint may recognize claimed values; the mandatory verifier independently recomputes them.
-        supported.update(Decimal(claim.value) for claim in numeric)
         return (meeting_review or semantic_review_requested(context)) and not (
-            _numbers(rendered) - supported
+            hasattr(parsed, "actions") and _numbers(rendered) - supported
         )
     except (AppError, ValidationError, KeyError, TypeError, ValueError):
         pass
@@ -473,20 +572,25 @@ def _numeric_refs(claims, context):
                 claim.group is not None
                 or not policy
                 or claim.column != policy["numerator"]
+                or claim.denominator != policy["denominator"]
                 or claim.unit != "ratio"
             ):
                 raise AppError("NUMERIC_REFERENCE_INVALID")
             expected = aggregate["ratio"]["value"]
         elif claim.group is not None:
             # The aggregate tool exposes grouped sums, not grouped means or ratios.
-            if claim.operation != "sum" or claim.unit != aggregate["unit"]:
+            if (
+                claim.operation != "sum"
+                or claim.unit != aggregate["unit"]
+                or claim.denominator is not None
+            ):
                 raise AppError("NUMERIC_REFERENCE_INVALID")
             group = next((item for item in aggregate["groups"] if item["key"] == claim.group), None)
             if group is None:
                 raise AppError("NUMERIC_REFERENCE_INVALID")
             expected = group["sums"][claim.column]
         else:
-            if claim.unit != aggregate["unit"]:
+            if claim.unit != aggregate["unit"] or claim.denominator is not None:
                 raise AppError("NUMERIC_REFERENCE_INVALID")
             expected = aggregate["columns"][claim.column][claim.operation]
         if expected is None or Decimal(claim.value) != Decimal(expected):
@@ -551,10 +655,13 @@ def model_grounding(output, context, *, semantic_review=None):
                 "explicit_meeting_fields" if reviewed_refs is None else "reviewed_meeting_fields"
             )
         layers.append("evidence_references")
-        supported_numbers = _numeric_refs(numeric, context)
-        supported_numbers.update(_source_numbers(evidences, refs, context))
-        if rendered is not None and _numbers(rendered) - supported_numbers:
+        _numeric_refs(numeric, context)
+        if hasattr(parsed, "actions") and _numbers(rendered) - _source_numbers(
+            evidences, refs, context
+        ):
             raise AppError("NUMERIC_MISMATCH")
+        if any(hasattr(parsed, key) for key in ("sections", "draft", "answer")):
+            layers.append("render_coverage")
         layers.append("numeric_references")
         if meeting_review or semantic_review_requested(context):
             if reviewed_refs is None:

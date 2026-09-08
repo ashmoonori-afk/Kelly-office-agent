@@ -1,5 +1,5 @@
 {
-  "version": "birkin-eval-v1.1",
+  "version": "birkin-eval-v1.2",
   "cases": [
     {
       "id": "table-01",
@@ -309,16 +309,11 @@
         },
         "numeric_locators": {
           "영업": [
-            "s1:L1",
             "s1:L2",
-            "s1:L3",
             "s1:L4"
           ],
           "운영": [
-            "s1:L1",
-            "s1:L2",
-            "s1:L3",
-            "s1:L4"
+            "s1:L3"
           ]
         },
         "required_assertions": [
@@ -509,9 +504,7 @@
         },
         "numeric_locators": {
           "total": [
-            "s1:L1",
             "s1:L2",
-            "s1:L3",
             "s1:L4"
           ]
         },
@@ -679,9 +672,7 @@
         },
         "numeric_locators": {
           "total": [
-            "s1:L1",
             "s1:L2",
-            "s1:L3",
             "s1:L4"
           ]
         },
@@ -1784,16 +1775,11 @@
         },
         "numeric_locators": {
           "2026-09-01": [
-            "s1:L1",
             "s1:L2",
-            "s1:L3",
             "s1:L4"
           ],
           "2026/09/01": [
-            "s1:L1",
-            "s1:L2",
-            "s1:L3",
-            "s1:L4"
+            "s1:L3"
           ]
         },
         "required_assertions": [

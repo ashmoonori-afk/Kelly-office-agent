@@ -269,14 +269,10 @@ def aggregate(args, context):
 
 
 def _content_from_input(value, output_format):
+    from .verification import render_content
+
     if isinstance(value, dict) and "content" in value:
-        narrative = Narrative.model_validate(value)
-        content = narrative.content.model_dump()
-        content["paragraphs"].extend("미확정: " + item for item in narrative.uncertainties)
-        content["paragraphs"].extend(
-            "해석: " + claim.text for claim in narrative.claims if claim.kind == "inference"
-        )
-        return office.DocumentContent.model_validate(content)
+        return render_content(Narrative.model_validate(value))
     if isinstance(value, list):
         actions = MeetingActionsV1(actions=value).actions
         return office.DocumentContent.model_validate(
@@ -298,17 +294,9 @@ def _content_from_input(value, output_format):
             }
         )
     if isinstance(value, dict) and "subject" in value and "body" in value:
-        draft = DraftReply.model_validate(value)
-        return office.DocumentContent(
-            title=draft.subject,
-            paragraphs=["수신인: " + (draft.recipient or "미정"), draft.body],
-        )
+        return render_content(DraftReply.model_validate(value))
     if isinstance(value, dict) and "found" in value:
-        answer = SearchAnswer.model_validate(value)
-        return office.DocumentContent(
-            title="검색 결과" if answer.found else "근거를 찾지 못했습니다",
-            paragraphs=[answer.text],
-        )
+        return render_content(SearchAnswer.model_validate(value))
     if isinstance(value, dict) and "columns" in value and "groups" in value:
         columns = list(value["columns"])
         groups = value["groups"] or [

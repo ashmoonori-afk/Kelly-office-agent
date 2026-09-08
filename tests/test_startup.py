@@ -1,9 +1,11 @@
 """Task Scheduler is a stubbed tool boundary; hidden serve/HTTP stop run for real."""
 
 import json
+import os
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -169,11 +171,13 @@ def test_actual_pythonw_hidden_server_authenticates_stop_and_flushes_logs(worksp
         assert stopped.returncode == 0
         assert json.loads(stopped.stdout) == {"state": "stopped"}
         assert process.wait(timeout=10) == 0
-        logs = (home / "logs" / "server.stderr.log").read_text(encoding="utf-8")
+        logs = "".join(
+            p.read_text(encoding="utf-8") for p in (home / "logs").glob("server.stderr.*.log")
+        )
         assert "Application shutdown complete." in logs
         assert "Traceback" not in logs
-        assert "kelly serve --access-code" in (home / "logs" / "server.stdout.log").read_text(
-            encoding="utf-8"
+        assert "kelly serve --access-code" in "".join(
+            p.read_text(encoding="utf-8") for p in (home / "logs").glob("server.stdout.*.log")
         )
         with engine.DaemonLock(home / "daemon.lock"):
             pass
@@ -182,3 +186,102 @@ def test_actual_pythonw_hidden_server_authenticates_stop_and_flushes_logs(worksp
             # Cleanup uses the same authenticated stop; never infer/kill another PID.
             startup.stop(path)
             process.wait(timeout=10)
+
+
+def test_actual_daily_log_thread_rotates_idle_stream_and_respects_thirty_days(tmp_path):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    now = datetime(2026, 9, 8, 12, tzinfo=UTC)
+    cutoff = now - timedelta(days=30)
+    contents = {
+        "server.stdout.2026-08-08.log": "expired dated",
+        "server.stderr.log": "expired legacy",
+        "server.stdout.log": "legacy exact boundary",
+        "server.stderr.2026-08-09.log": "thirty-day period still overlaps",
+        "server.stdout.2027-01-01.log": "future file",
+        "notes.log": "unrelated",
+        "server.stdout.2026-02-30.log": "invalid date",
+    }
+    for name, text in contents.items():
+        path = logs / name
+        path.write_text(text, encoding="utf-8")
+        stamp = cutoff.timestamp() if name == "server.stdout.log" else cutoff.timestamp() - 1
+        os.utime(path, (stamp, stamp))
+    with startup._log_streams(logs, clock=lambda: now, maintenance_seconds=0.01) as (out, err):
+        out.write("first day\n")
+        assert not (logs / "server.stdout.2026-08-08.log").exists()
+        assert not (logs / "server.stderr.log").exists()
+        for name in set(contents) - {"server.stdout.2026-08-08.log", "server.stderr.log"}:
+            assert (logs / name).read_text(encoding="utf-8") == contents[name]
+        first = logs / "server.stdout.2026-09-08.log"
+        now += timedelta(days=1)
+        rotated = logs / "server.stdout.2026-09-09.log"
+        deadline = time.monotonic() + 3
+        while not rotated.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert rotated.exists()  # Real maintenance thread rotates even with no new writes.
+        out.write("second day\n")
+        err.write("safe diagnostic\n")
+        assert first.read_text(encoding="utf-8") == "first day\n"
+        assert rotated.read_text(encoding="utf-8") == "second day\n"
+    assert out.closed and err.closed
+
+
+def test_log_clock_rollback_keeps_active_stream_and_defers_expiry(tmp_path):
+    now = datetime(2026, 9, 8, 12, tzinfo=UTC)
+    with startup._log_streams(tmp_path, clock=lambda: now) as (out, _):
+        first = out._path
+        original = now
+        now -= timedelta(days=50)
+        out.write("rollback\n")
+        assert out._path == first and out._latest == original
+        pending = tmp_path / "server.stdout.2026-01-01.log"
+        pending.write_text("keep until clock recovers", encoding="utf-8")
+        os.utime(pending, (0, 0))
+        out.maintain()
+        assert pending.exists()
+        now = original + timedelta(minutes=1)
+        out.maintain()
+        assert not pending.exists()
+        assert first.read_text(encoding="utf-8") == "rollback\n"
+
+
+def test_log_expiry_preserves_open_files_hardlinks_and_junctions(tmp_path):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    outside = tmp_path / "other"
+    outside.mkdir()
+    source = outside / "private.txt"
+    source.write_text("unrelated data", encoding="utf-8")
+    os.utime(source, (0, 0))
+    alias = logs / "server.stdout.2026-01-01.log"
+    os.link(source, alias)
+    junction = logs / "server.stdout.2026-01-02.log"
+    created = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
+        capture_output=True,
+        check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert created.returncode == 0
+    busy = logs / "server.stdout.log"
+    busy.write_text("older daemon", encoding="utf-8")
+    os.utime(busy, (0, 0))
+    now = datetime(2026, 9, 8, 12, tzinfo=UTC)
+    with startup._log_stream(busy), startup._log_streams(logs, clock=lambda: now) as (out, _):
+        assert busy.exists() and alias.exists() and junction.is_dir()
+        out.write("current daemon\n")
+    with startup._log_streams(logs, clock=lambda: now):
+        assert not busy.exists()  # Only after the older stream closes.
+    assert source.read_text(encoding="utf-8") == "unrelated data"
+    assert alias.exists() and junction.is_dir()
+
+
+def test_log_open_rejects_hardlinked_current_filename(tmp_path):
+    now = datetime(2026, 9, 8, tzinfo=UTC)
+    original = tmp_path / "original.txt"
+    original.write_text("do not append", encoding="utf-8")
+    os.link(original, tmp_path / "server.stdout.2026-09-08.log")
+    with pytest.raises(OSError), startup._log_streams(tmp_path, clock=lambda: now):
+        pass
+    assert original.read_text(encoding="utf-8") == "do not append"

@@ -236,9 +236,21 @@ def test_w02_csv_to_grounded_report_docx_and_receipt(workspace):
         assert aggregate["unit"] == "unspecified"
         return {
             "sections": {
-                "content": {"title": "매출 보고서", "paragraphs": ["금액 합계는 300.00입니다."]},
+                "content": {
+                    "title": [{"claim_id": "title1"}],
+                    "paragraphs": [[{"numeric_id": "n1"}]],
+                },
+                "claims": [
+                    {
+                        "id": "title1",
+                        "text": "매출 보고서",
+                        "kind": "inference",
+                        "evidence_ids": [],
+                    }
+                ],
                 "numeric_claims": [
                     {
+                        "id": "n1",
                         "value": "300.00",
                         "aggregate_step": "t1",
                         "column": "금액",
@@ -251,7 +263,7 @@ def test_w02_csv_to_grounded_report_docx_and_receipt(workspace):
 
     result, receipt, provenance, created = finish(workspace, run, "report_prose", "M", output)
     document = Document(io.BytesIO(created))
-    assert "금액 합계는 300.00입니다." in [paragraph.text for paragraph in document.paragraphs]
+    assert "금액 합계: 300.00 unspecified" in [paragraph.text for paragraph in document.paragraphs]
     assert Decimal(
         result["result_json"]["outputs"]["t1"]["aggregate"]["columns"]["금액"]["sum"]
     ) == Decimal("300.00")
@@ -327,7 +339,13 @@ def test_w04_project_search_answers_with_date_and_excludes_foreign_source(worksp
         items = sent_evidence(payload)
         assert len(items) == 1 and items[0]["artifact_id"] == source["id"]
         answer = "2026-09-03에 기존 제안을 유지하기로 결정했습니다."
-        return {"answer": {"found": True, "text": answer, "claims": [fact(items[0], answer)]}}
+        return {
+            "answer": {
+                "found": True,
+                "text": [{"claim_id": "fact1"}],
+                "claims": [fact(items[0], answer)],
+            }
+        }
 
     _, receipt, provenance, created = finish(workspace, run, "search_answer", "L", output)
     text = created.decode("utf-8")
@@ -347,10 +365,23 @@ def test_single_source_summary_is_one_light_call_and_reopens_as_markdown(workspa
         return {
             "sections": {
                 "content": {
-                    "title": "업무 요약",
-                    "paragraphs": ["고객의 납기 확인 요청에 따라 담당 부서가 일정을 검토한다."],
+                    "title": [{"claim_id": "title1"}],
+                    "paragraphs": [[{"claim_id": "fact1"}]],
                 },
-                "claims": [fact(item, item["quote"], f"fact{i}") for i, item in enumerate(items)],
+                "claims": [
+                    {
+                        "id": "title1",
+                        "text": "업무 요약",
+                        "kind": "inference",
+                        "evidence_ids": [],
+                    },
+                    {
+                        "id": "fact1",
+                        "text": "고객의 납기 확인 요청에 따라 담당 부서가 일정을 검토한다.",
+                        "kind": "fact",
+                        "evidence_ids": [item["evidence_id"] for item in items],
+                    },
+                ],
             }
         }
 
@@ -369,10 +400,24 @@ def test_reply_draft_reopens_as_docx_with_unknown_recipient_and_no_send(workspac
         item = next(item for item in sent_evidence(payload) if "안내문" in item["quote"])
         return {
             "draft": {
-                "subject": "행사 안내문 검토 회신 초안",
+                "subject": [{"claim_id": "subject1"}],
                 "recipient": None,
-                "body": "안녕하세요. 행사 안내문 검토 요청을 확인했습니다. 검토 후 회신드리겠습니다.",
-                "claims": [fact(item, "행사 안내문 검토 요청을 받았습니다.")],
+                "body": [{"claim_id": "fact1"}, {"claim_id": "reply1"}],
+                "claims": [
+                    {
+                        "id": "subject1",
+                        "text": "행사 안내문 검토 회신 초안",
+                        "kind": "inference",
+                        "evidence_ids": [],
+                    },
+                    fact(item, "안녕하세요. 행사 안내문 검토 요청을 확인했습니다. "),
+                    {
+                        "id": "reply1",
+                        "text": "검토 후 회신드리겠습니다.",
+                        "kind": "inference",
+                        "evidence_ids": [],
+                    },
+                ],
             }
         }
 
@@ -398,13 +443,14 @@ def test_w04_no_search_hit_returns_unconfirmed_without_fabricated_sources(worksp
         return {
             "answer": {
                 "found": False,
-                "text": "프로젝트 자료에서 해당 결정을 확인할 수 없습니다.",
+                "text": [{"uncertainty_id": "u1"}],
                 "claims": [],
+                "uncertainties": [{"id": "u1", "text": "근거 없음", "evidence_ids": []}],
             }
         }
 
     _, receipt, provenance, created = finish(workspace, run, "search_answer", "L", output)
     text = created.decode("utf-8")
-    assert "해당 결정을 확인할 수 없습니다." in text and "근거를 찾지 못했습니다" in text
+    assert "미확정: 근거 없음" in text and "근거를 찾지 못했습니다" in text
     assert receipt["source_versions"] == {} and provenance["evidence_refs"] == []
     assert source["id"] not in canonical_json(provenance)

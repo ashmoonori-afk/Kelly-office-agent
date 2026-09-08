@@ -2,13 +2,18 @@
 
 import base64
 import hashlib
+import io
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
+import threading
 import time
 from contextlib import ExitStack, contextmanager, redirect_stderr, redirect_stdout
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as day_time
 from pathlib import Path
 
 import httpx
@@ -136,6 +141,8 @@ def _log_stream(path):
         disposition=4,
     )  # OPEN_ALWAYS
     try:
+        if windows_native.handle_information(handle).nNumberOfLinks != 1:
+            raise OSError("linked logs are refused")
         descriptor = msvcrt.open_osfhandle(handle, os.O_WRONLY | os.O_APPEND | os.O_BINARY)
     except BaseException:
         windows_native.close_handle(handle)
@@ -144,14 +151,137 @@ def _log_stream(path):
         yield stream
 
 
+def _prune_logs(logs, kind, current, now):
+    """Delete only expired app logs, through an exclusive non-link handle."""
+    import ctypes
+    from ctypes import wintypes
+
+    cutoff = now - timedelta(days=30)
+    native = windows_native.api()
+    dispose = ctypes.WinDLL("kernel32", use_last_error=True).SetFileInformationByHandle
+    dispose.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
+    dispose.restype = wintypes.BOOL
+    with guard_directory(logs):
+        for path in logs.iterdir():
+            match = re.fullmatch(rf"server\.{kind}(?:\.(\d{{4}}-\d{{2}}-\d{{2}}))?\.log", path.name)
+            if not match or path == current:
+                continue
+            try:
+                if (
+                    match[1]
+                    and datetime.combine(
+                        date.fromisoformat(match[1]) + timedelta(days=1), day_time(), UTC
+                    )
+                    >= cutoff
+                ):
+                    continue
+                handle = windows_native.open_handle(
+                    path, directory=False, access=native.GENERIC_READ | 0x00010000, share=0
+                )  # DELETE access; any open reader/writer prevents this exclusive claim.
+            except (OSError, ValueError, OverflowError):
+                continue
+            try:
+                info = windows_native.handle_information(handle)
+                stamp = (
+                    info.ftLastWriteTime.dwHighDateTime << 32
+                ) | info.ftLastWriteTime.dwLowDateTime
+                if (
+                    info.nNumberOfLinks != 1
+                    or stamp / 10_000_000 - 11_644_473_600 >= cutoff.timestamp()
+                ):
+                    continue
+                remove = ctypes.c_ubyte(1)  # FILE_DISPOSITION_INFO.DeleteFile, class 4.
+                if not dispose(handle, 4, ctypes.byref(remove), ctypes.sizeof(remove)):
+                    continue  # A locked/read-only file stays for a later maintenance pass.
+            finally:
+                windows_native.close_handle(handle)
+
+
+class _DailyLog(io.TextIOBase):
+    """UTF-8 append stream; backwards wall clocks never rotate or expire files."""
+
+    encoding = "utf-8"
+
+    def __init__(self, logs, kind, clock):
+        self.logs, self.kind, self.clock = logs, kind, clock
+        self._lock = threading.RLock()
+        self._opened = self._stream = self._day = self._latest = self._cleaned_at = None
+        self.maintain()
+
+    def maintain(self):
+        now = self.clock().astimezone(UTC)
+        with self._lock, guard_directory(self.logs):
+            if self.closed or self._latest is not None and now < self._latest:
+                return
+            self._latest = now
+            if self._day is None or now.date() > self._day:
+                path = self.logs / f"server.{self.kind}.{now.date().isoformat()}.log"
+                opened = _log_stream(path)
+                try:
+                    stream = opened.__enter__()
+                except OSError:
+                    if self._stream is None:
+                        raise
+                    return  # Keep the current stream usable; retry rotation next minute/write.
+                if self._opened is not None:
+                    self._opened.__exit__(None, None, None)
+                self._opened, self._stream, self._day, self._path = opened, stream, now.date(), path
+            if self._cleaned_at is None or now - self._cleaned_at >= timedelta(seconds=60):
+                _prune_logs(self.logs, self.kind, self._path, now)
+                self._cleaned_at = now
+
+    def write(self, value):
+        self.maintain()
+        with self._lock:
+            return self._stream.write(value)
+
+    def flush(self):
+        with self._lock:
+            if not self.closed and self._stream is not None:
+                self._stream.flush()
+
+    def writable(self):
+        return True
+
+    def close(self):
+        with self._lock:
+            if not self.closed:
+                super().close()
+                if self._opened is not None:
+                    self._opened.__exit__(None, None, None)
+
+
+@contextmanager
+def _log_streams(logs, *, clock=lambda: datetime.now(UTC), maintenance_seconds=60):
+    with guard_directory(logs), ExitStack() as stack:
+        streams = [
+            stack.enter_context(_DailyLog(logs, kind, clock)) for kind in ("stdout", "stderr")
+        ]
+        stop = threading.Event()
+
+        def maintain():
+            while not stop.wait(maintenance_seconds):
+                for stream in streams:
+                    try:
+                        stream.maintain()
+                    except (OSError, AppError):
+                        pass  # No deletion on failure; retry without logging private exception text.
+
+        worker = threading.Thread(target=maintain, name="kelly-log-maintenance", daemon=True)
+        worker.start()
+        try:
+            yield streams
+        finally:
+            stop.set()
+            worker.join()
+
+
 def run_hidden(config_path):
     path = Path(config_path).absolute()
     settings = config.load_config(path)
     home = config.home_path(settings, path)
     logs = ensure_directory(home / "logs")
-    with guard_directory(logs), ExitStack() as stack:
-        stdout = stack.enter_context(_log_stream(logs / "server.stdout.log"))
-        stderr = stack.enter_context(_log_stream(logs / "server.stderr.log"))
+    with _log_streams(logs) as (stdout, stderr), ExitStack() as stack:
         stack.enter_context(redirect_stdout(stdout))
         stack.enter_context(redirect_stderr(stderr))
         # pythonw has no console streams. Install real streams before uvicorn imports.

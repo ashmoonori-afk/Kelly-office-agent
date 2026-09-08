@@ -392,7 +392,14 @@ def test_real_text_source_with_mock_http_records_exam_checks_and_blind_task(
     value = json.loads(path.read_text("utf-8"))
     value["models"][0]["binding"].update(roles=["H"], capabilities=["structured_output", task])
     path.write_text(json.dumps(value), "utf-8")
-    review = {"sections": {"content": {"paragraphs": ["자료에 없는 결론입니다."]}}}
+    review = {
+        "sections": {
+            "content": {"paragraphs": [[{"claim_id": "unsupported"}]]},
+            "claims": [
+                {"id": "unsupported", "text": "자료에 없는 결론입니다.", "evidence_ids": []}
+            ],
+        }
+    }
     prepared = q.prepare_trials(
         path,
         model_id="synthetic-candidate",
@@ -439,7 +446,7 @@ def test_real_text_source_with_mock_http_records_exam_checks_and_blind_task(
             output = {
                 "answer": {
                     "found": True,
-                    "text": evidence[0]["quote"],
+                    "text": [{"claim_id": "claim"}],
                     "claims": [
                         {
                             "id": "claim",

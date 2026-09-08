@@ -253,6 +253,9 @@ def test_schema_preserves_optional_refs_and_rejects_unsupported_semantics():
     converted = xai_schema(plan)
     assert "oneOf" in converted["$defs"]["TodoV1"]["properties"]["executor"]
     assert "discriminator" not in converted["$defs"]["TodoV1"]["properties"]["executor"]
+    for task in ("summarize", "draft_reply", "search_answer"):
+        reference_schema = compact_schema(MODEL_OUTPUT_TYPES[task].model_json_schema())
+        assert xai_schema(reference_schema) == reference_schema
     for invalid in [
         {"$defs": {"Cycle": {"$ref": "#/$defs/Cycle"}}, "$ref": "#/$defs/Cycle"},
         {"oneOf": [{"type": "string"}, {"type": "string"}]},

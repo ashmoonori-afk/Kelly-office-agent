@@ -79,8 +79,20 @@ def source_context(tmp_path, text, *, filename="meeting.txt", quality="balanced"
 def report(text, refs=(), numeric=()):
     return {
         "sections": {
-            "content": {"paragraphs": [text]},
-            "claims": [{"id": "c1", "text": text, "evidence_ids": list(refs)}] if refs else [],
+            "content": {
+                "paragraphs": [
+                    [{"claim_id": "c1"}],
+                    *[[{"numeric_id": claim["id"]}] for claim in numeric],
+                ]
+            },
+            "claims": [
+                {
+                    "id": "c1",
+                    "text": text,
+                    "kind": "fact" if refs else "inference",
+                    "evidence_ids": list(refs),
+                }
+            ],
             "numeric_claims": list(numeric),
         }
     }
@@ -145,9 +157,7 @@ def test_claim_ids_are_bound_to_supplied_reopened_evidence(tmp_path):
         ),
         (lambda value: value["sections"]["claims"][0].update(evidence_ids=[]), "MISSING_EVIDENCE"),
         (
-            lambda value: value["sections"]["content"].update(
-                paragraphs=["프로젝트 예산은 999원이다."]
-            ),
+            lambda value: value["sections"]["claims"][0].update(text="프로젝트 예산은 999원이다."),
             "NUMERIC_MISMATCH",
         ),
         (
@@ -223,11 +233,28 @@ def test_missing_owner_and_calendar_date_are_not_guessed(tmp_path):
 def test_search_found_requires_a_factual_cited_claim_and_cannot_invent_proof():
     context = {"todo": model_todo("search_answer", "SearchAnswerV1"), "inputs": {}}
     assert (
-        model_grounding({"answer": {"found": False, "text": "확인 불가"}}, context).status == "pass"
+        model_grounding(
+            {
+                "answer": {
+                    "found": False,
+                    "text": [{"uncertainty_id": "u1"}],
+                    "uncertainties": [{"id": "u1", "text": "확인 불가", "evidence_ids": []}],
+                }
+            },
+            context,
+        ).status
+        == "pass"
     )
-    assert model_grounding({"answer": {"found": True, "text": "승인했음"}}, context).errors == [
-        "MISSING_EVIDENCE"
-    ]
+    assert model_grounding(
+        {
+            "answer": {
+                "found": True,
+                "text": [{"claim_id": "c1"}],
+                "claims": [{"id": "c1", "text": "승인했음", "kind": "inference"}],
+            }
+        },
+        context,
+    ).errors == ["MISSING_EVIDENCE"]
     context["todo"] = model_todo("semantic_review", "ValidationResultV1")
     context["inputs"] = {"t1": {"content": {"paragraphs": ["검토 대상"]}}}
     assert model_grounding(
@@ -250,7 +277,9 @@ def test_high_review_rechecks_real_txt_and_all_claim_references(tmp_path):
         context["inputs"] = {"t1": {"items": [item.model_dump() for item in evidence]}}
         candidate = {
             "sections": {
-                "content": {"paragraphs": [item.quote for item in evidence]},
+                "content": {
+                    "paragraphs": [[{"claim_id": f"c{index}"}] for index in range(len(evidence))]
+                },
                 "claims": [
                     {"id": f"c{index}", "text": item.quote, "evidence_ids": [ref]}
                     for index, (item, ref) in enumerate(zip(evidence, refs, strict=True))
@@ -330,7 +359,7 @@ def test_field_and_numeric_contracts_without_process_boundary(monkeypatch):
             "groups": [{"key": "영업", "sums": {"매출": "30.00"}}],
         },
     )
-    claim = NumericClaim(value="60", aggregate_step="t1", column="매출", unit="KRW")
+    claim = NumericClaim(id="n1", value="60", aggregate_step="t1", column="매출", unit="KRW")
     assert verification._numeric_refs([claim], {}) == {Decimal(60)}
     for update, code in [
         ({"value": "61"}, "NUMERIC_MISMATCH"),
@@ -515,6 +544,7 @@ def test_numeric_claims_recalculate_actual_source_and_match_exact_reference(tmp_
     context.update(todo=todo, inputs={"t1": aggregate})
     claims = [
         {
+            "id": "sum",
             "value": "60.00",
             "aggregate_step": "t1",
             "column": "매출",
@@ -522,6 +552,7 @@ def test_numeric_claims_recalculate_actual_source_and_match_exact_reference(tmp_
             "unit": "KRW",
         },
         {
+            "id": "average",
             "value": "20.00",
             "aggregate_step": "t1",
             "column": "매출",
@@ -529,6 +560,7 @@ def test_numeric_claims_recalculate_actual_source_and_match_exact_reference(tmp_
             "unit": "KRW",
         },
         {
+            "id": "group",
             "value": "30.00",
             "aggregate_step": "t1",
             "column": "매출",
@@ -537,11 +569,13 @@ def test_numeric_claims_recalculate_actual_source_and_match_exact_reference(tmp_
             "unit": "KRW",
         },
         {
+            "id": "ratio",
             "value": "2.00",
             "aggregate_step": "t1",
             "column": "매출",
             "operation": "ratio",
             "unit": "ratio",
+            "denominator": "비용",
         },
     ]
     calls = []
@@ -553,14 +587,13 @@ def test_numeric_claims_recalculate_actual_source_and_match_exact_reference(tmp_
 
     monkeypatch.setattr(office, "aggregate", recalculate)
     assert (
-        model_grounding(
-            report("합계 60원, 평균 20원, 영업 30원, 비율 2", numeric=claims), context
-        ).status
+        model_grounding(report("합계, 평균, 영업 집계와 비율", numeric=claims), context).status
         == "pass"
     )
     assert calls == [source["id"]]
     for update, code in [
         ({"value": "600"}, "NUMERIC_MISMATCH"),
+        ({"column": "비용"}, "NUMERIC_MISMATCH"),
         ({"aggregate_step": "other_run"}, "NUMERIC_REFERENCE_INVALID"),
         ({"unit": "USD"}, "NUMERIC_REFERENCE_INVALID"),
         ({"group": "미등록부서"}, "NUMERIC_REFERENCE_INVALID"),
@@ -571,6 +604,14 @@ def test_numeric_claims_recalculate_actual_source_and_match_exact_reference(tmp_
     assert model_grounding(report("합계 999원", numeric=[claims[0]]), context).errors == [
         "NUMERIC_MISMATCH"
     ]
+    # A real verified revenue total cannot justify a literal claim about costs, even when the
+    # same number is declared in a numeric reference elsewhere in the document.
+    assert model_grounding(report("비용 60원", numeric=[claims[0]]), context).errors == [
+        "NUMERIC_MISMATCH"
+    ]
+    assert model_grounding(
+        report("비율", numeric=[{**claims[-1], "denominator": "매출"}]), context
+    ).errors == ["NUMERIC_REFERENCE_INVALID"]
     # Corrupting both the saved result and the supplied result must not fool a recomputation.
     aggregate["columns"]["매출"]["sum"] = "600.00"
     context["conn"].execute(
@@ -578,6 +619,6 @@ def test_numeric_claims_recalculate_actual_source_and_match_exact_reference(tmp_
         (canonical_json({"aggregate": aggregate}), context["run"]["id"]),
     )
     assert model_grounding(
-        report("합계 600원", numeric=[{**claims[0], "value": "600"}]), context
+        report("합계", numeric=[{**claims[0], "value": "600"}]), context
     ).errors == ["NUMERIC_MISMATCH"]
     context["conn"].close()

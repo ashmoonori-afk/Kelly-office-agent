@@ -64,7 +64,7 @@ Routes use task complexity and required capabilities. Prices and remaining spend
 
 The current cloud adapter is **xAI**. Model availability, project permission, capabilities, and matching quality evidence must all pass before a model can handle work. Live model qualification and the full A/B/C workload comparison are unfinished.
 
-Windows CI checks local file, database, browser, and daemon workflows, plus an isolated install, start, stop, and uninstall. Live provider/Telegram acceptance, full accessibility, and Office layout verification remain incomplete. A document's structural checks do not guarantee its visual layout. This is a preview, with no measured percentage savings claim.
+Windows CI checks local file, database, browser, and daemon workflows, plus an isolated install, restart, backup, restore, and uninstall. Live provider/Telegram acceptance, full accessibility, and Office layout verification remain incomplete. A document's structural checks do not guarantee its visual layout. This is a preview, with no measured percentage savings claim.
 
 ## Setup and maintenance
 

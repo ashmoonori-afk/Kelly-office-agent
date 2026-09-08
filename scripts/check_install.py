@@ -1,4 +1,4 @@
-"""Build offline; install the locked runtime in a new venv; run, stop, and uninstall."""
+"""Install the locked runtime; verify restart, recovery, local key removal and uninstall."""
 
 import hashlib
 import json
@@ -51,6 +51,49 @@ def run(command, *, cwd, timeout=120):
     return result.stdout
 
 
+def server_cycle(entrypoint, config_path, work, port):
+    server = subprocess.Popen(
+        [str(entrypoint), "serve", "--config", str(config_path)],
+        cwd=work,
+        env=environment(),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        deadline = time.monotonic() + 30
+        healthy = False
+        while time.monotonic() < deadline and server.poll() is None:
+            try:
+                with opener.open(f"http://127.0.0.1:{port}/api/health", timeout=1) as response:
+                    healthy = json.load(response) == {"ok": True}
+                if healthy:
+                    break
+            except urllib.error.URLError:
+                time.sleep(0.1)
+        if not healthy:
+            raise RuntimeError("Installed server did not become healthy")
+        stopped = json.loads(
+            run([str(entrypoint), "stop", "--config", str(config_path)], cwd=work, timeout=45)
+        )
+        _, server_log = server.communicate(timeout=10)
+        if (
+            stopped != {"state": "stopped"}
+            or server.returncode != 0
+            or "Application shutdown complete." not in server_log
+        ):
+            raise RuntimeError("Installed server did not stop gracefully")
+    finally:
+        if server.poll() is None:
+            # Failure remains unknown if authenticated stop cannot finish. Never kill by PID.
+            run([str(entrypoint), "stop", "--config", str(config_path)], cwd=work, timeout=45)
+            server.communicate(timeout=10)
+
+
 def main():
     if os.name != "nt":
         raise RuntimeError("This check requires Windows")
@@ -101,11 +144,14 @@ def main():
     config_path = work / "config.json"
     setup = """
 import sys
+import io
+import json
+from contextlib import closing
 from pathlib import Path
 from importlib.metadata import distribution, metadata
 from importlib.resources import files
+from birkin_lite import artifacts, db
 from birkin_lite.config import AppConfig, create_config
-from birkin_lite.db import init_db
 
 assert metadata('kelly-office-agent')['License-Expression'] == 'MIT'
 assert 'Kelly' in metadata('kelly-office-agent').get_payload()
@@ -114,53 +160,73 @@ resources = files('birkin_lite')
 assert resources.joinpath('schema.sql').is_file()
 assert all(resources.joinpath('licenses', name).is_file() for name in ('sbom.json', 'third-party.txt'))
 assert all(resources.joinpath('static', name).is_file() for name in ('index.html', 'app.js', 'app.css', 'kelly-companion.png', 'favicon.svg'))
-create_config(Path(sys.argv[1]), AppConfig(home='data', port=int(sys.argv[2])))
-init_db(Path(sys.argv[1]).parent / 'data' / 'state.db').close()
+settings = AppConfig(home='data', port=int(sys.argv[2]))
+create_config(Path(sys.argv[1]), settings)
+home = Path(sys.argv[1]).parent / 'data'
+with closing(db.init_db(home / 'state.db')) as conn:
+    source = artifacts.import_source(home, conn, io.BytesIO(b'Kelly package recovery check.'), {'filename': 'recovery.txt'}, settings.actor(), 'default')
+    db.set_value(conn, 'install-check', {'source_id': source['id']})
+print(json.dumps({key: source[key] for key in ('id', 'relative_path', 'sha256')}))
 """
-    run([str(python), "-c", setup, str(config_path), str(port)], cwd=work)
+    source = json.loads(run([str(python), "-c", setup, str(config_path), str(port)], cwd=work))
     doctor = json.loads(run([str(entrypoint), "doctor", "--config", str(config_path)], cwd=work))
     if not doctor["ok"] or any(doctor["credentials_present"].values()):
         raise RuntimeError("Installed doctor did not pass without credentials")
-    server = subprocess.Popen(
-        [str(entrypoint), "serve", "--config", str(config_path)],
-        cwd=work,
-        env=environment(),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        creationflags=subprocess.CREATE_NO_WINDOW,
+    for _ in range(2):
+        server_cycle(entrypoint, config_path, work, port)
+    local_key = """
+import sys
+from pathlib import Path
+from pydantic import SecretStr
+from birkin_lite import config
+home = Path(sys.argv[1])
+config.store_secret(home, 'xai', SecretStr(sys.argv[2]))
+assert (config.stored_secret(home, 'xai') is not None) == bool(sys.argv[2])
+"""
+    run(
+        [str(python), "-c", local_key, str(work / "data"), "synthetic-install-check-only"], cwd=work
     )
-    try:
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        deadline = time.monotonic() + 30
-        healthy = False
-        while time.monotonic() < deadline and server.poll() is None:
-            try:
-                with opener.open(f"http://127.0.0.1:{port}/api/health", timeout=1) as response:
-                    healthy = json.load(response) == {"ok": True}
-                if healthy:
-                    break
-            except urllib.error.URLError:
-                time.sleep(0.1)
-        if not healthy:
-            raise RuntimeError("Installed server did not become healthy")
-        stopped = json.loads(
-            run([str(entrypoint), "stop", "--config", str(config_path)], cwd=work, timeout=45)
+    snapshot, restored = work / "snapshot", work / "restored"
+    backup = json.loads(
+        run(
+            [str(entrypoint), "backup", "--config", str(config_path), "--output", str(snapshot)],
+            cwd=work,
         )
-        _, server_log = server.communicate(timeout=10)
-        if (
-            stopped != {"state": "stopped"}
-            or server.returncode != 0
-            or "Application shutdown complete." not in server_log
-        ):
-            raise RuntimeError("Installed server did not stop gracefully")
-    finally:
-        if server.poll() is None:
-            # Failure remains unknown if authenticated stop cannot finish. Never kill by PID.
-            run([str(entrypoint), "stop", "--config", str(config_path)], cwd=work, timeout=45)
-            server.communicate(timeout=10)
+    )
+    recovered = json.loads(
+        run(
+            [str(entrypoint), "restore", "--input", str(snapshot), "--home", str(restored)],
+            cwd=work,
+        )
+    )
+    if not recovered["authority_reset"] or recovered["files_restored"] != backup["files_backed_up"]:
+        raise RuntimeError("Installed backup and restore disagreed")
+    run([str(python), "-c", local_key, str(work / "data"), ""], cwd=work)
+    recovery_check = """
+import sys
+from pathlib import Path
+from birkin_lite import artifacts, config, db, operations
+for folder in sys.argv[1:]:
+    home = Path(folder)
+    with operations._database(home) as conn:
+        source = db.get_value(conn, 'install-check')['source_id']
+        with artifacts.open_artifact(home, conn, source, config.AppConfig().actor(), 'default') as stream:
+            assert stream.read() == b'Kelly package recovery check.'
+    assert config.stored_secret(home, 'xai') is None
+assert not (Path(sys.argv[2]) / 'auth').exists()
+assert not (Path(sys.argv[3]) / 'auth').exists()
+"""
+    run(
+        [str(python), "-c", recovery_check, str(work / "data"), str(snapshot), str(restored)],
+        cwd=work,
+    )
+    restored_config = restored / "config.json"
+    restored_doctor = json.loads(
+        run([str(entrypoint), "doctor", "--config", str(restored_config)], cwd=work)
+    )
+    if not restored_doctor["ok"] or any(restored_doctor["credentials_present"].values()):
+        raise RuntimeError("Restored doctor did not pass without credentials")
+    server_cycle(entrypoint, restored_config, work, port)
     run([uv, "pip", "uninstall", "--python", str(python), "kelly-office-agent"], cwd=work)
     if entrypoint.exists() or entrypoint.with_name("blite.exe").exists():
         raise RuntimeError("Uninstall left an entrypoint behind")
@@ -174,6 +240,12 @@ init_db(Path(sys.argv[1]).parent / 'data' / 'state.db').close()
     )
     if hashlib.sha256((root / "uv.lock").read_bytes()).hexdigest() != original_lock:
         raise RuntimeError("Dependency lock changed")
+    for home in (work / "data", snapshot, restored):
+        if (
+            hashlib.sha256((home / source["relative_path"]).read_bytes()).hexdigest()
+            != source["sha256"]
+        ):
+            raise RuntimeError("Recovery or uninstall changed the managed source")
     report = {
         "scope": "isolated_venv_on_existing_windows_host",
         "distribution": "kelly-office-agent",
@@ -185,6 +257,13 @@ init_db(Path(sys.argv[1]).parent / 'data' / 'state.db').close()
         "server_health": True,
         "graceful_stop": True,
         "authenticated_stop": True,
+        "restart": True,
+        "backup_restore": True,
+        "restored_server_health": True,
+        "local_synthetic_key_removed": True,
+        "credentials_excluded_from_backup": True,
+        "provider_key_revocation_verified": False,
+        "source_sha256_preserved": source["sha256"],
         "license_resources": True,
         "ui_resources": True,
         "uninstalled": True,

@@ -372,7 +372,9 @@ def test_model_source_numbers_reach_scoring_only_through_independent_exact_evide
         assert len(references) == 3
         output = {
             "sections": {
-                "content": {"paragraphs": facts},
+                "content": {
+                    "paragraphs": [[{"claim_id": "c" + str(index)}] for index in range(len(facts))]
+                },
                 "claims": [
                     {"id": "c" + str(index), "text": fact, "evidence_ids": references}
                     for index, fact in enumerate(facts)
