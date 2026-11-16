@@ -590,11 +590,12 @@ def test_repeated_midnight_uses_first_calendar_boundary(tmp_path):
             request(),
             actor=OWNER,
             purpose="generate",
-            now=datetime(2026, 11, 1, 5, 30, tzinfo=UTC),
+            # A past transition: tz releases disagree on Havana's 2026 rules.
+            now=datetime(2020, 11, 1, 5, 30, tzinfo=UTC),
             timezone_name="America/Havana",
         )
-        assert record["day_start_utc"] == "2026-11-01T04:00:00+00:00"
-        assert record["day_end_utc"] == "2026-11-02T05:00:00+00:00"
+        assert record["day_start_utc"] == "2020-11-01T04:00:00+00:00"
+        assert record["day_end_utc"] == "2020-11-02T05:00:00+00:00"
     finally:
         conn.close()
 
