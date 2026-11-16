@@ -9,9 +9,7 @@ import pytest
 from pydantic import SecretStr
 
 from kelly import db
-from kelly.contracts import ActionProposal, Actor, RunRequest, canonical_json, digest
-from kelly.telegram import (
-    TelegramClient,
+from kelly.channels.router import (
     create_callback,
     create_pairing,
     deliver_once,
@@ -19,6 +17,8 @@ from kelly.telegram import (
     prepare_delivery,
     register_connection,
 )
+from kelly.channels.telegram import TelegramClient
+from kelly.contracts import ActionProposal, Actor, RunRequest, canonical_json, digest
 
 OWNER = Actor(id="owner", project_ids=["sales"])
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
@@ -188,7 +188,7 @@ def test_inbox_run_and_cursor_rollback_together_then_reopen_deduplicates(tmp_pat
     "broken", ["oversized", "callback_message", "callback_chat", "callback_sender"]
 )
 def test_invalid_payload_with_valid_id_is_rejected_without_blocking_next_update(tmp_path, broken):
-    from kelly.telegram import MAX_UPDATE_BYTES
+    from kelly.channels.telegram import MAX_UPDATE_BYTES
 
     conn = paired(tmp_path)
     update = callback(2, "approve:" + "a" * 24)

@@ -9,7 +9,8 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import automation, config, db, engine, planning, providers, retention, telegram, tools
+from . import automation, config, db, engine, planning, providers, retention, tools
+from .channels import router
 from .contracts import AppError, digest
 from .safe_io import ensure_directory
 
@@ -212,14 +213,14 @@ class Runtime:
         if saved is None or saved[0] != signature:
             self._close_service(lane)
             client = (
-                telegram.TelegramClient(token, http_transport=self._telegram_transport)
+                router.open_adapter(token, http_transport=self._telegram_transport)
                 if token is not None
                 else None
             )
             self._services[lane] = (signature, client)
         client = self._services[lane][1]
         if client is not None:
-            telegram.register_connection(
+            router.register_connection(
                 conn,
                 self.actor,
                 current.telegram.connection_id,
@@ -432,85 +433,11 @@ class Runtime:
                     raise AppError("POLICY_DENIED")
                 return _clock()
 
-            telegram.poll_once(client, conn, self.actor, current.telegram.connection_id, now=clock)
+            router.poll_once(client, conn, self.actor, current.telegram.connection_id, now=clock)
         return True
 
-    def _queue_results(self, conn, connection_id):
-        rows = conn.execute(
-            "SELECT * FROM runs WHERE actor_id=? AND source IN ('telegram','automation') "
-            "AND state IN ('succeeded','awaiting_approval','awaiting_input','failed','expired',"
-            "'rejected') AND COALESCE(json_extract(result_json,'$.archived'),0)=0 ORDER BY created_at,id",
-            (self.actor.id,),
-        ).fetchall()
-        for row in rows:
-            run = db.row_dict(row)
-            try:
-                markup = None
-                if run["state"] == "awaiting_approval":
-                    approval = db.row_dict(
-                        conn.execute(
-                            "SELECT * FROM approvals WHERE run_id=? AND state='pending' "
-                            "AND expires_at>? ORDER BY created_at LIMIT 1",
-                            (run["id"], _clock().isoformat()),
-                        ).fetchone()
-                    )
-                    if approval is None:
-                        continue
-                    key = "telegram:approval_notice:" + approval["id"]
-                    markup = db.get_value(conn, key)
-                    if markup is None:
-                        markup = {
-                            "inline_keyboard": [
-                                [
-                                    {
-                                        "text": text,
-                                        "callback_data": telegram.create_callback(
-                                            conn,
-                                            self.actor,
-                                            connection_id,
-                                            kind="approval",
-                                            target_id=approval["id"],
-                                            decision=decision,
-                                            now=_clock(),
-                                        ),
-                                    }
-                                    for text, decision in (("승인", "approve"), ("거절", "reject"))
-                                ]
-                            ]
-                        }
-                        db.set_value(conn, key, markup)
-                status = {
-                    "succeeded": "업무를 완료했습니다.",
-                    "awaiting_approval": "업무 실행 승인이 필요합니다.",
-                    "awaiting_input": "업무에 필요한 입력을 화면에서 보완해 주세요.",
-                    "failed": "업무를 완료하지 못했습니다. 화면에서 상태를 확인해 주세요.",
-                    "expired": "업무 승인이 만료되었습니다.",
-                    "rejected": "업무 승인이 거절되었습니다.",
-                }[run["state"]]
-                telegram.prepare_delivery(
-                    conn,
-                    self.actor,
-                    connection_id,
-                    run["id"],
-                    text=status,
-                    reply_markup=markup,
-                    now=_clock(),
-                )
-                if run["state"] == "succeeded":
-                    for output in (run["result_json"] or {}).get("outputs", {}).values():
-                        receipt = output.get("receipt") if isinstance(output, dict) else None
-                        if isinstance(receipt, dict) and receipt.get("run_id") == run["id"]:
-                            telegram.prepare_delivery(
-                                conn,
-                                self.actor,
-                                connection_id,
-                                run["id"],
-                                artifact_id=receipt["artifact_id"],
-                                now=_clock(),
-                            )
-            except AppError:
-                # Pausing, re-pairing or revising authority must suppress an old delivery.
-                continue
+    def _queue_results(self, conn, connection_id, adapter):
+        router.queue_results(conn, self.actor, connection_id, adapter, now=_clock)
 
     def outbox_once(self):
         if self._stopping.is_set() or self._lock.handle is None:
@@ -519,7 +446,7 @@ class Runtime:
             current, client = self._telegram_service(conn, "outbox")
             if client is None:
                 return False
-            self._queue_results(conn, current.telegram.connection_id)
+            self._queue_results(conn, current.telegram.connection_id, client)
             if self._stopping.is_set():
                 return False
 
@@ -533,7 +460,7 @@ class Runtime:
                     raise AppError("POLICY_DENIED")
 
             return (
-                telegram.deliver_once(
+                router.deliver_once(
                     client,
                     conn,
                     self.home,

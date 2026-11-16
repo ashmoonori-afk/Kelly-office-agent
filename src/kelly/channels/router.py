@@ -2,20 +2,17 @@
 
 import hashlib
 import hmac
-import json
-import logging
 import re
 import secrets
 import uuid
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 
-import httpx
-from pydantic import SecretStr, ValidationError
+from pydantic import JsonValue, ValidationError
 
-from .artifacts import metadata, open_artifact
-from .contracts import Actor, AppError, RunRequest, canonical_json, digest
-from .db import (
+from ..artifacts import metadata, open_artifact
+from ..contracts import Actor, AppError, RunRequest, canonical_json, digest
+from ..db import (
     automation_proposal_hash,
     create_run,
     get_automation,
@@ -28,218 +25,25 @@ from .db import (
     set_value,
     transaction,
 )
-from .engine import resolve_approval
-
-MAX_UPDATE_BYTES = 65536
-MAX_RESPONSE_BYTES = 1024 * 1024
+from ..engine import resolve_approval
+from .base import (
+    Action,
+    ChannelAdapter,
+    ChannelAddress,
+    ChannelError,
+    InboundEvent,
+    OutboundMessage,
+    _markup,
+    _message_text,
+    _private_id,
+    require_message,
+)
 
 
 def _now(value):
     if not isinstance(value, datetime) or value.utcoffset() is None:
         raise AppError("INVALID_INPUT")
     return value.astimezone(UTC)
-
-
-class TelegramError(AppError):
-    def __init__(self, code, *, ambiguous=False, retry_after=None):
-        super().__init__(code)
-        self.ambiguous = ambiguous
-        self.retry_after = retry_after
-
-
-class _TokenFilter(logging.Filter):
-    def __init__(self, token):
-        super().__init__()
-        self.token = token
-
-    def filter(self, record):
-        record.msg = record.getMessage().replace(self.token, "[REDACTED]")
-        record.args = ()
-        return True
-
-
-class TelegramClient:
-    """No I/O at construction; each explicit method makes one HTTPS attempt."""
-
-    def __init__(self, token: SecretStr, *, http_transport=None):
-        if not isinstance(token, SecretStr) or not re.fullmatch(
-            r"[0-9]{1,20}:[A-Za-z0-9_-]{20,128}", token.get_secret_value()
-        ):
-            raise AppError("TELEGRAM_AUTH_ERROR")
-        value = token.get_secret_value()
-        self.credential_fingerprint = hashlib.sha256(
-            b"birkin-lite:telegram-token:v1\0" + value.encode()
-        ).hexdigest()
-        self._filter = _TokenFilter(value)
-        self._loggers = [
-            logging.getLogger(name) for name in ("httpx", "httpcore.http11", "httpcore.http2")
-        ]
-        for logger in self._loggers:
-            logger.addFilter(self._filter)
-        self._client = httpx.Client(
-            base_url="https://api.telegram.org/bot" + value + "/",
-            verify=True,
-            follow_redirects=False,
-            trust_env=False,
-            transport=http_transport
-            if http_transport is not None
-            else httpx.HTTPTransport(retries=0, trust_env=False),
-        )
-        self._webhook_checked = False
-
-    def close(self):
-        self._client.close()
-        for logger in self._loggers:
-            logger.removeFilter(self._filter)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        self.close()
-
-    def _request(self, method, *, payload=None, files=None, timeout=30, sending=False):
-        try:
-            arguments = {"data": payload, "files": files} if files else {"json": payload or {}}
-            with self._client.stream("POST", method, timeout=timeout, **arguments) as response:
-                data = bytearray()
-                for chunk in response.iter_bytes(65536):
-                    data.extend(chunk)
-                    if len(data) > MAX_RESPONSE_BYTES:
-                        raise TelegramError("TELEGRAM_RESPONSE_LIMIT", ambiguous=sending)
-                try:
-                    body = json.loads(data)
-                except (ValueError, UnicodeDecodeError, RecursionError):
-                    raise TelegramError("TELEGRAM_INVALID_RESPONSE", ambiguous=sending) from None
-                if not isinstance(body, dict) or type(body.get("ok")) is not bool:
-                    raise TelegramError("TELEGRAM_INVALID_RESPONSE", ambiguous=sending)
-                if response.is_success and body["ok"] is True and "result" in body:
-                    return body["result"]
-                error_code = body.get("error_code", response.status_code)
-                if body["ok"] is False and error_code == 429:
-                    parameters = body.get("parameters")
-                    retry = parameters.get("retry_after") if isinstance(parameters, dict) else None
-                    if type(retry) is int and 1 <= retry <= 86400:
-                        raise TelegramError("TELEGRAM_RATE_LIMIT", retry_after=retry)
-                    raise TelegramError("TELEGRAM_INVALID_RESPONSE", ambiguous=sending)
-                ambiguous = sending and (response.status_code >= 500 or body["ok"] is True)
-                raise TelegramError("TELEGRAM_SEND_FAILED", ambiguous=ambiguous)
-        except httpx.RequestError:
-            raise TelegramError("TELEGRAM_NETWORK_ERROR", ambiguous=sending) from None
-
-    def check_webhook(self):
-        result = self._request("getWebhookInfo")
-        if not isinstance(result, dict) or not isinstance(result.get("url"), str):
-            raise TelegramError("TELEGRAM_INVALID_RESPONSE")
-        if result["url"]:
-            raise TelegramError("TELEGRAM_WEBHOOK_ACTIVE")
-        self._webhook_checked = True
-        return True
-
-    def get_updates(self, offset=None, timeout=25):
-        if (
-            (offset is not None and (type(offset) is not int or offset < 0))
-            or type(timeout) is not int
-            or not 0 <= timeout <= 50
-        ):
-            raise AppError("INVALID_INPUT")
-        payload = {
-            "timeout": timeout,
-            "limit": 10,
-            "allowed_updates": ["message", "callback_query"],
-        }
-        if offset is not None:
-            payload["offset"] = offset
-        result = self._request("getUpdates", payload=payload, timeout=timeout + 10)
-        if not isinstance(result, list) or len(result) > 10:
-            raise TelegramError("TELEGRAM_INVALID_RESPONSE")
-        return result
-
-    def answer_callback_query(self, callback_query_id):
-        if not isinstance(callback_query_id, str) or not 1 <= len(callback_query_id) <= 256:
-            raise AppError("INVALID_INPUT")
-        return self._request(
-            "answerCallbackQuery", payload={"callback_query_id": callback_query_id}, timeout=5
-        )
-
-    def send_message(self, chat_id, text, reply_markup=None):
-        _message_text(text, 4096)
-        _private_id(chat_id)
-        payload = {"chat_id": chat_id, "text": text, "link_preview_options": {"is_disabled": True}}
-        if reply_markup is not None:
-            payload["reply_markup"] = _markup(reply_markup)
-        return self._sent(self._request("sendMessage", payload=payload, sending=True), chat_id)
-
-    def send_document(self, chat_id, stream, filename, caption=""):
-        _private_id(chat_id)
-        if (
-            not isinstance(filename, str)
-            or not 1 <= len(filename) <= 240
-            or re.search(r"[\\/:\x00-\x1f]", filename)
-        ):
-            raise AppError("INVALID_INPUT")
-        if caption:
-            _message_text(caption, 1024)
-        return self._sent(
-            self._request(
-                "sendDocument",
-                payload={"chat_id": str(chat_id), "caption": caption},
-                files={"document": (filename, stream, "application/octet-stream")},
-                timeout=60,
-                sending=True,
-            ),
-            chat_id,
-        )
-
-    @staticmethod
-    def _sent(result, chat_id):
-        if (
-            not isinstance(result, dict)
-            or type(result.get("message_id")) is not int
-            or result["message_id"] <= 0
-            or not isinstance(result.get("chat"), dict)
-            or type(result["chat"].get("id")) is not int
-            or result["chat"]["id"] != chat_id
-        ):
-            raise TelegramError("TELEGRAM_INVALID_RESPONSE", ambiguous=True)
-        return result
-
-
-def _private_id(value):
-    if type(value) is not int or not 1 <= value < 2**52:
-        raise AppError("POLICY_DENIED")
-    return value
-
-
-def _message_text(text, limit):
-    try:
-        valid = (
-            isinstance(text, str) and text.strip() and len(text.encode("utf-16-le")) // 2 <= limit
-        )
-    except UnicodeError:
-        valid = False
-    if not valid:
-        raise AppError("INVALID_INPUT")
-
-
-def _markup(value):
-    if not isinstance(value, dict) or set(value) != {"inline_keyboard"}:
-        raise AppError("INVALID_INPUT")
-    rows = value["inline_keyboard"]
-    if not isinstance(rows, list) or not 1 <= len(rows) <= 4:
-        raise AppError("INVALID_INPUT")
-    for row in rows:
-        if not isinstance(row, list) or not 1 <= len(row) <= 4:
-            raise AppError("INVALID_INPUT")
-        for button in row:
-            if not isinstance(button, dict) or set(button) != {"text", "callback_data"}:
-                raise AppError("INVALID_INPUT")
-            _message_text(button["text"], 100)
-            if not isinstance(button["callback_data"], str) or not re.fullmatch(
-                r"(?:approve|reject):[A-Za-z0-9_-]{20,40}", button["callback_data"]
-            ):
-                raise AppError("INVALID_INPUT")
-    return value
 
 
 def _connection(conn, actor, connection_id, *, paired=False):
@@ -324,18 +128,10 @@ def create_pairing(conn, actor, connection_id, *, now):
     return {"code": code, "expires_at": expires}
 
 
-def _identity(message, *, callback=False):
-    sender = message.get("from")
-    original = message.get("message") if callback else message
-    chat = original.get("chat") if isinstance(original, dict) else None
-    if (
-        not isinstance(sender, dict)
-        or sender.get("is_bot") is not False
-        or not isinstance(chat, dict)
-        or chat.get("type") != "private"
-    ):
+def _identity(event: InboundEvent):
+    if not event.human or not event.private:
         raise AppError("POLICY_DENIED")
-    user_id, chat_id = _private_id(sender.get("id")), _private_id(chat.get("id"))
+    user_id, chat_id = _private_id(event.user_id), _private_id(event.chat_id)
     if user_id != chat_id:
         raise AppError("POLICY_DENIED")
     return user_id, chat_id
@@ -509,34 +305,20 @@ def _callback(conn, actor, connection, data, now):
     return result
 
 
-def ingest_update(conn, actor: Actor, connection_id, update, *, now, client=None):
+def ingest_event(conn, actor: Actor, connection_id, event: InboundEvent, *, now, client=None):
     """Persist one bounded update, its effect and the next offset in one transaction."""
     now = _now(now)
-    try:
-        raw = json.dumps(
-            update, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8", errors="surrogatepass")
-    except (ValueError, TypeError, RecursionError, UnicodeError):
-        raise AppError("INVALID_INPUT") from None
-    if (
-        not isinstance(update, dict)
-        or type(update.get("update_id")) is not int
-        or update["update_id"] < 0
-    ):
-        raise AppError("INVALID_INPUT")
-    raw_hash = hashlib.sha256(raw).hexdigest()
     if client is not None:
         _bind_client(conn, actor, connection_id, client, now)
-    query = update.get("callback_query")
-    if len(raw) <= MAX_UPDATE_BYTES and isinstance(query, dict) and client is not None:
+    if event.byte_size <= 65536 and event.kind == "action" and client is not None:
         try:
-            client.answer_callback_query(query.get("id"))
-        except (TelegramError, AppError):
+            client.ack(event)
+        except (ChannelError, AppError):
             pass  # A lost UI acknowledgement never grants or blocks durable authorization.
     with transaction(conn):
         connection = _connection(conn, actor, connection_id)
         epoch = connection.get("update_epoch", 1)
-        key = (str(epoch) + ":" if epoch != 1 else "") + str(update["update_id"])
+        key = (str(epoch) + ":" if epoch != 1 else "") + str(event.event_id)
         existing = row_dict(
             conn.execute(
                 "SELECT * FROM inbox_events WHERE source='telegram' AND connection_id=? AND event_key=?",
@@ -546,62 +328,48 @@ def ingest_update(conn, actor: Actor, connection_id, update, *, now, client=None
         if existing:
             if (
                 existing["actor_id"] != actor.id
-                or existing["payload_json"].get("raw_sha256") != raw_hash
+                or existing["payload_json"].get("raw_sha256") != event.raw_sha256
             ):
                 raise AppError("CONFLICT", status=409)
             return existing
-        payload = {"update_id": update["update_id"], "raw_sha256": raw_hash}
+        payload: dict[str, JsonValue] = {
+            "update_id": event.event_id,
+            "raw_sha256": event.raw_sha256,
+        }
         conn.execute(
             "INSERT INTO inbox_events(source,connection_id,event_key,actor_id,payload_json,received_at) VALUES ('telegram',?,?,?,?,?)",
             (connection_id, key, actor.id, canonical_json(payload), now.isoformat()),
         )
         state, run_id = "rejected", None
         try:
-            if len(raw) > MAX_UPDATE_BYTES:
-                raise AppError("LIMIT_EXCEEDED")
-            if isinstance(query, dict):
-                user_id, chat_id = _identity(query, callback=True)
+            if event.error_code is not None:
+                raise AppError(event.error_code)
+            if event.kind == "action":
+                user_id, chat_id = _identity(event)
                 _authenticate(connection, user_id, chat_id)
                 if client is None:
                     raise AppError("INVALID_INPUT")
-                payload["callback_result"] = _callback(
-                    conn, actor, connection, query.get("data"), now
-                )
+                payload["callback_result"] = _callback(conn, actor, connection, event.action, now)
                 state = "enqueued"
             else:
-                message = update.get("message")
-                if not isinstance(message, dict):
+                user_id, chat_id = _identity(event)
+                if event.unsupported or event.kind == "file":
                     raise AppError("UNSUPPORTED_CAPABILITY")
-                user_id, chat_id = _identity(message)
-                if any(
-                    k in message
-                    for k in (
-                        "forward_origin",
-                        "forward_from",
-                        "forward_sender_name",
-                        "forward_from_chat",
-                        "document",
-                        "photo",
-                        "audio",
-                        "video",
-                        "voice",
-                    )
-                ):
-                    raise AppError("UNSUPPORTED_CAPABILITY")
-                text = message.get("text")
-                _message_text(text, 4096)
-                pair = re.fullmatch(r"/(?:pair|start) ([A-Za-z0-9_-]{1,128})", text)
+                text = _message_text(event.text, 4096)
+                pair = event.kind == "pair"
                 if pair:
-                    _pair(conn, connection, pair[1], user_id, chat_id, now)
+                    _pair(conn, connection, event.action, user_id, chat_id, now)
                     payload["kind"], state = "pairing", "enqueued"
                 else:
                     _authenticate(connection, user_id, chat_id)
                     request, output_format = text, "text"
                     if text.startswith("/"):
                         parts = text.split(maxsplit=1)
-                        output_format = parts[0][1:]
-                        if output_format not in {"text", "md", "csv", "xlsx", "docx"}:
-                            raise AppError("UNSUPPORTED_CAPABILITY")
+                        match parts[0][1:]:
+                            case "text" | "md" | "csv" | "xlsx" | "docx" as output_format:
+                                pass
+                            case _:
+                                raise AppError("UNSUPPORTED_CAPABILITY")
                         request = parts[1].strip() if len(parts) == 2 else ""
                     payload.update(kind="request", pairing_revision=connection["revision"])
                     run = create_run(
@@ -631,7 +399,7 @@ def ingest_update(conn, actor: Actor, connection_id, update, *, now, client=None
         )
         cursor_key = "telegram:cursor:" + connection_id
         cursor = get_value(conn, cursor_key, 0)
-        set_value(conn, cursor_key, max(cursor, update["update_id"] + 1), now=now.isoformat())
+        set_value(conn, cursor_key, max(cursor, event.event_id + 1), now=now.isoformat())
         return row_dict(
             conn.execute(
                 "SELECT * FROM inbox_events WHERE source='telegram' AND connection_id=? AND event_key=?",
@@ -643,24 +411,15 @@ def ingest_update(conn, actor: Actor, connection_id, update, *, now, client=None
 def poll_once(client, conn, actor, connection_id, *, now, timeout=25):
     """Use a clock callable at runtime so expiry is checked after blocking polling."""
     _bind_client(conn, actor, connection_id, client, _now(now() if callable(now) else now))
-    if not client._webhook_checked:
-        client.check_webhook()
-    updates = client.get_updates(
-        get_value(conn, "telegram:cursor:" + connection_id), timeout=timeout
-    )
-    if any(
-        not isinstance(update, dict)
-        or type(update.get("update_id")) is not int
-        or update["update_id"] < 0
-        for update in updates
-    ):
-        raise TelegramError("TELEGRAM_INVALID_RESPONSE")
-    updates.sort(key=lambda update: update["update_id"])
+    if client.caps.inbound != "pull":
+        raise AppError("UNSUPPORTED_CAPABILITY")
+    cursor = get_value(conn, "telegram:cursor:" + connection_id)
+    events, _ = client.receive(str(cursor) if cursor is not None else None, timeout=timeout)
     return [
-        ingest_update(
-            conn, actor, connection_id, update, now=now() if callable(now) else now, client=client
+        ingest_event(
+            conn, actor, connection_id, event, now=now() if callable(now) else now, client=client
         )
-        for update in updates
+        for event in events
     ]
 
 
@@ -841,6 +600,8 @@ def deliver_once(client, conn, home, actor, *, now, connection_id=None, before_s
         authority, payload = row["authority_json"], row["payload_json"]
         _bind_client(conn, actor, authority["connection_id"], client, now)
         if payload["artifact_id"]:
+            if not client.caps.files:
+                raise AppError("UNSUPPORTED_CAPABILITY")
             record = _deliverable_artifact(conn, actor, row["run_id"], payload["artifact_id"])
             if (
                 record["sha256"] != payload["artifact_hash"]
@@ -852,6 +613,16 @@ def deliver_once(client, conn, home, actor, *, now, connection_id=None, before_s
         else:
             held = nullcontext(None)
         with held as stream:
+            message = OutboundMessage(
+                text=payload["text"],
+                actions=tuple(
+                    tuple(Action(button["text"], button["callback_data"]) for button in row)
+                    for row in (payload["reply_markup"] or {}).get("inline_keyboard", [])
+                ),
+                file=stream,
+                filename=payload["filename"],
+            )
+            require_message(client.caps, message)
             with transaction(conn):
                 if before_send is not None:
                     before_send()
@@ -866,31 +637,24 @@ def deliver_once(client, conn, home, actor, *, now, connection_id=None, before_s
                 )
                 if claimed.rowcount != 1:
                     raise AppError("CONFLICT", status=409)
-            if stream is not None:
-                result = client.send_document(
-                    authority["chat_id"], stream, payload["filename"], payload["text"]
-                )
-            else:
-                result = client.send_message(
-                    authority["chat_id"], payload["text"], payload["reply_markup"]
-                )
+            result = client.send(ChannelAddress(authority["chat_id"]), message)
             sent = True
         with transaction(conn):
             conn.execute(
                 "UPDATE outbox SET state='sent',remote_id=?,sent_at=?,error_code=NULL WHERE id=? AND state='sending'",
-                (str(result["message_id"]), now.isoformat(), row["id"]),
+                (result.message_id, now.isoformat(), row["id"]),
             )
-    except (TelegramError, AppError, OSError) as error:
+    except (ChannelError, AppError, OSError) as error:
         code = error.code if isinstance(error, AppError) else "SOURCE_CHANGED"
         with transaction(conn):
             fresh = row_dict(
                 conn.execute("SELECT * FROM outbox WHERE id=?", (row["id"],)).fetchone()
             )
             state, due = "failed", None
-            if sent or (isinstance(error, TelegramError) and error.ambiguous):
+            if sent or (isinstance(error, ChannelError) and error.ambiguous):
                 state = "unknown"
             elif (
-                isinstance(error, TelegramError)
+                isinstance(error, ChannelError)
                 and error.retry_after is not None
                 and fresh["attempt_count"] < 3
             ):
@@ -900,3 +664,98 @@ def deliver_once(client, conn, home, actor, *, now, connection_id=None, before_s
                 (state, due, code, row["id"]),
             )
     return row_dict(conn.execute("SELECT * FROM outbox WHERE id=?", (row["id"],)).fetchone())
+
+
+def open_adapter(token, *, http_transport=None) -> ChannelAdapter:
+    """Construct the configured transport without exposing it to the worker."""
+    from .telegram import TelegramAdapter
+
+    return TelegramAdapter(token, http_transport=http_transport)
+
+
+def ingest_update(conn, actor, connection_id, update, *, now, client=None):
+    """Compatibility entry point for callers that still supply Telegram wire payloads."""
+    from .telegram import parse_update
+
+    now = _now(now)
+    return ingest_event(conn, actor, connection_id, parse_update(update), now=now, client=client)
+
+
+def queue_results(conn, actor, connection_id, adapter: ChannelAdapter, *, now):
+    rows = conn.execute(
+        "SELECT * FROM runs WHERE actor_id=? AND source IN ('telegram','automation') "
+        "AND state IN ('succeeded','awaiting_approval','awaiting_input','failed','expired',"
+        "'rejected') AND COALESCE(json_extract(result_json,'$.archived'),0)=0 ORDER BY created_at,id",
+        (actor.id,),
+    ).fetchall()
+    for row in rows:
+        run = row_dict(row)
+        try:
+            markup = None
+            if run["state"] == "awaiting_approval":
+                if not adapter.caps.buttons:
+                    raise AppError("UNSUPPORTED_CAPABILITY")
+                approval = row_dict(
+                    conn.execute(
+                        "SELECT * FROM approvals WHERE run_id=? AND state='pending' "
+                        "AND expires_at>? ORDER BY created_at LIMIT 1",
+                        (run["id"], now().isoformat()),
+                    ).fetchone()
+                )
+                if approval is None:
+                    continue
+                key = "telegram:approval_notice:" + approval["id"]
+                markup = get_value(conn, key)
+                if markup is None:
+                    markup = {
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": text,
+                                    "callback_data": create_callback(
+                                        conn,
+                                        actor,
+                                        connection_id,
+                                        kind="approval",
+                                        target_id=approval["id"],
+                                        decision=decision,
+                                        now=now(),
+                                    ),
+                                }
+                                for text, decision in (("승인", "approve"), ("거절", "reject"))
+                            ]
+                        ]
+                    }
+                    set_value(conn, key, markup)
+            status = {
+                "succeeded": "업무를 완료했습니다.",
+                "awaiting_approval": "업무 실행 승인이 필요합니다.",
+                "awaiting_input": "업무에 필요한 입력을 화면에서 보완해 주세요.",
+                "failed": "업무를 완료하지 못했습니다. 화면에서 상태를 확인해 주세요.",
+                "expired": "업무 승인이 만료되었습니다.",
+                "rejected": "업무 승인이 거절되었습니다.",
+            }[run["state"]]
+            prepare_delivery(
+                conn,
+                actor,
+                connection_id,
+                run["id"],
+                text=status,
+                reply_markup=markup,
+                now=now(),
+            )
+            if run["state"] == "succeeded":
+                for output in (run["result_json"] or {}).get("outputs", {}).values():
+                    receipt = output.get("receipt") if isinstance(output, dict) else None
+                    if isinstance(receipt, dict) and receipt.get("run_id") == run["id"]:
+                        prepare_delivery(
+                            conn,
+                            actor,
+                            connection_id,
+                            run["id"],
+                            artifact_id=receipt["artifact_id"],
+                            now=now(),
+                        )
+        except AppError:
+            # Pausing, re-pairing or revising authority must suppress an old delivery.
+            continue
