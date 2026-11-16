@@ -32,6 +32,11 @@ def _run_worker(command, request, *, timeout_s, memory_mb):
     output = bytearray()
     oversized = threading.Event()
     read_failure = threading.Event()
+    memory_exceeded = threading.Event()
+    memory_failed = threading.Event()
+    finished = threading.Event()
+    watchdog = None
+    peak_memory = 0
     assigned = False
 
     def stop():
@@ -39,7 +44,10 @@ def _run_worker(command, request, *, timeout_s, memory_mb):
             job.terminate()
         elif process is not None and process.poll() is None:
             if os.name == "posix":
-                os.killpg(process.pid, signal.SIGKILL)
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
             else:
                 process.kill()
 
@@ -53,6 +61,33 @@ def _run_worker(command, request, *, timeout_s, memory_mb):
                 output.extend(chunk)
         except OSError:
             read_failure.set()
+
+    def sample_memory():
+        nonlocal peak_memory
+        from .platform._darwin_memory import footprint
+
+        try:
+            peak_memory = max(peak_memory, footprint(process.pid))
+        except ProcessLookupError:
+            # wait() may own Popen's waitpid lock, so poll() can still return None
+            # after the kernel has already removed the child's accounting record.
+            return
+        except OSError:
+            if process.poll() is None:
+                memory_failed.set()
+                stop()
+            return
+        if peak_memory > memory_mb * 1024 * 1024:
+            memory_exceeded.set()
+            stop()
+
+    def watch_memory():
+        while not finished.wait(0.01):
+            if process.poll() is not None:
+                return
+            sample_memory()
+            if memory_exceeded.is_set() or memory_failed.is_set():
+                return
 
     try:
         if os.name == "nt":
@@ -77,6 +112,15 @@ def _run_worker(command, request, *, timeout_s, memory_mb):
                 raise AppError("UNSUPPORTED_CAPABILITY")
             assigned = True
             job.resume(process.pid)
+        if sys.platform == "darwin":
+            # Prove accounting works before releasing the stdin containment gate.
+            sample_memory()
+            if memory_failed.is_set():
+                raise AppError("UNSUPPORTED_CAPABILITY")
+            if memory_exceeded.is_set():
+                raise AppError("LIMIT_EXCEEDED")
+            watchdog = threading.Thread(target=watch_memory, daemon=True)
+            watchdog.start()
         # Worker cannot parse a file before this write. Assignment failure remains fail-closed.
         thread = threading.Thread(target=read_output, daemon=True)
         thread.start()
@@ -92,8 +136,10 @@ def _run_worker(command, request, *, timeout_s, memory_mb):
         if thread.is_alive():
             stop()
             raise AppError("PARSER_FAILED")
-        if oversized.is_set():
+        if oversized.is_set() or memory_exceeded.is_set():
             raise AppError("LIMIT_EXCEEDED")
+        if memory_failed.is_set():
+            raise AppError("UNSUPPORTED_CAPABILITY")
         if read_failure.is_set() or process.returncode != 0:
             raise AppError("PARSER_FAILED")
         try:
@@ -110,7 +156,9 @@ def _run_worker(command, request, *, timeout_s, memory_mb):
         if "format" in response:
             response["sandbox"] = {
                 "memory_limit_bytes": memory_mb * 1024 * 1024,
-                "peak_committed_bytes": job.peak_memory_bytes() if job is not None else None,
+                "peak_committed_bytes": (
+                    job.peak_memory_bytes() if job is not None else peak_memory or None
+                ),
                 "elapsed_ms": int((time.monotonic() - started) * 1000),
             }
         return response
@@ -119,6 +167,9 @@ def _run_worker(command, request, *, timeout_s, memory_mb):
     except (OSError, ValueError):
         raise AppError("UNSUPPORTED_CAPABILITY") from None
     finally:
+        finished.set()
+        if watchdog is not None:
+            watchdog.join()
         if process is not None:
             stop()
             try:
