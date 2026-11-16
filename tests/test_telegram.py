@@ -7,11 +7,7 @@ import pytest
 from pydantic import SecretStr
 
 from kelly import db
-from kelly.contracts import Actor, AppError
-from kelly.telegram import (
-    MAX_RESPONSE_BYTES,
-    TelegramClient,
-    TelegramError,
+from kelly.channels.router import (
     cancel_delivery,
     create_pairing,
     deliver_once,
@@ -20,6 +16,8 @@ from kelly.telegram import (
     prepare_delivery,
     register_connection,
 )
+from kelly.channels.telegram import MAX_RESPONSE_BYTES, TelegramClient, TelegramError
+from kelly.contracts import Actor, AppError
 
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
 OWNER = Actor(id="owner", project_ids=["sales"])
@@ -333,7 +331,7 @@ def test_token_epoch_preserves_old_receipt_and_accepts_low_new_update_ids(tmp_pa
     )
 
     from kelly.artifacts import open_artifact
-    from kelly.telegram import create_callback
+    from kelly.channels.router import create_callback
 
     conn = recovery_paired(tmp_path)
     no_requests = httpx.MockTransport(

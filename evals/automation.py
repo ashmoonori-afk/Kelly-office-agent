@@ -841,7 +841,10 @@ def execute_scenario(case, directory):
                     name: hashlib.sha256((module_dir / name).read_bytes()).hexdigest()
                     for name in (
                         "automation.py",
-                        "telegram.py",
+                        "channels/base.py",
+                        "channels/router.py",
+                        "channels/telegram.py",
+                        "telegram/__init__.py",
                         "db.py",
                         "engine.py",
                         "config.py",
