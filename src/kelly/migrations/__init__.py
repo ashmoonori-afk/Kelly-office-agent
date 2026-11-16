@@ -31,6 +31,10 @@ def sync_binding(conn, connection, now):
 def upgrade(conn):
     conn.execute("BEGIN IMMEDIATE")
     with conn:
+        # Another connection may have upgraded between the caller's version check and this lock.
+        version = conn.execute("SELECT value_json FROM kv WHERE key='schema_version'").fetchone()
+        if json.loads(version[0]) != 1:
+            return
         _script(conn, "up")
         for row in conn.execute("SELECT * FROM kv WHERE key LIKE 'telegram:connection:%'"):
             sync_binding(conn, json.loads(row["value_json"]), row["updated_at"])

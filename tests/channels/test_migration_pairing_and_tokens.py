@@ -9,7 +9,7 @@ import pytest
 
 from kelly import db
 from kelly.channels import router
-from kelly.migrations import downgrade
+from kelly.migrations import downgrade, upgrade
 
 from .approval_support import NOW, OWNER, callback, pending
 from .fake import FakeAdapter
@@ -81,3 +81,19 @@ def test_v01_database_copy_up_down_preserves_pairing_and_legacy_actions(tmp_path
         assert conn.execute("SELECT state FROM approvals").fetchone()[0] == ("pending" if used else "approved")
     with closing(sqlite3.connect(source)) as original:
         assert db.get_value(original, "schema_version") == 1
+
+
+def test_second_connection_that_saw_version_one_does_not_upgrade_again(tmp_path):
+    path = tmp_path / "v01.db"
+    first, second = (sqlite3.connect(path, isolation_level=None) for _ in range(2))
+    with closing(first), closing(second):
+        for conn in (first, second):
+            conn.row_factory = sqlite3.Row
+        first.executescript(Path(db.__file__).with_name("schema.sql").read_text(encoding="utf-8"))
+        db.set_value(first, "schema_version", 1)
+        # Both connections read version 1 before either one takes the write lock.
+        assert db.get_value(second, "schema_version") == 1
+        upgrade(first)
+        upgrade(second)
+        assert db.get_value(second, "schema_version") == 2
+        assert second.execute("SELECT count(*) FROM channel_bindings").fetchone()[0] == 0
