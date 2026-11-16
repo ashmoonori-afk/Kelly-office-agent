@@ -19,6 +19,14 @@ Original license: MIT, Copyright (c) 2026 ashmoonori. The complete license is pr
 
 ## Retained code and changes
 
+P2 moves Kelly's own Task Scheduler and Windows log code from
+`src/kelly/startup.py` at `47e3019` to `src/kelly/platform/_windows_service.py`,
+changing only relative imports. The Windows mutable-file guard moves unchanged
+from `src/kelly/operations.py` at the same commit to
+`src/kelly/platform/_windows_identity.py`. Native macOS service, identity guards
+and memory accounting are new stdlib implementations; no third-party source or
+runtime dependency is added.
+
 - `windows_native`, `path_identity`, `secure_file_open`: native identities and no-reparse opens.
 - `package_scan`, `package_zip`, `package_xml`, `package_relationships`, `package_types`, `limits`,
   `safe_xml`, `artifact_identity`: ZIP/header/CRC/XML/OOXML identity validation.

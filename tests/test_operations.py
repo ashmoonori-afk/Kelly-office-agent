@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import os
 import subprocess
 import zipfile
 from contextlib import closing
@@ -212,9 +213,15 @@ def test_backup_restore_preserves_sqlite_records_and_retracts_external_authority
 
 def test_backup_requires_stopped_daemon_and_never_overwrites(workspace, tmp_path):
     path, home, _ = workspace
-    # The handle used around SQLite allows its byte locks but blocks replacement.
-    with operations._identity_guard(home / "state.db"), pytest.raises(OSError):
-        (home / "state.db").rename(home / "replacement.db")
+    # Windows denies replacement; POSIX detects it before guarded work is accepted.
+    if os.name == "nt":
+        with operations._identity_guard(home / "state.db"), pytest.raises(OSError):
+            (home / "state.db").rename(home / "replacement.db")
+    else:
+        with pytest.raises(AppError) as error, operations._identity_guard(home / "state.db"):
+            (home / "state.db").rename(home / "replacement.db")
+        assert error.value.code == "SOURCE_CHANGED"
+        (home / "replacement.db").rename(home / "state.db")
     snapshot = tmp_path / "snapshot"
     with engine.DaemonLock(home / "daemon.lock"), pytest.raises(AppError, match="이미 실행"):
         operations.backup(path, snapshot)
@@ -361,13 +368,16 @@ def test_restore_rejects_unsafe_backups_before_creating_home(workspace, tmp_path
         }
     elif attack == "junction":
         linked = tmp_path / "linked"
-        result = subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(linked), str(snapshot)],
-            capture_output=True,
-            check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-        assert result.returncode == 0
+        if os.name == "nt":
+            result = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(linked), str(snapshot)],
+                capture_output=True,
+                check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            assert result.returncode == 0
+        else:
+            linked.symlink_to(snapshot, target_is_directory=True)
         snapshot = linked
     elif attack == "zip_bomb":
         archive = tmp_path / "bomb.zip"

@@ -12,9 +12,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import config, db, engine
-from ._vendor.office import path_identity, windows_native
-from ._vendor.office.errors import DocumentError
 from .contracts import SAFE_MESSAGES, AppError, canonical_json
+from .platform.identity import identity_guard as _identity_guard
 from .safe_io import guard_directory, open_new, open_regular, validate_root
 
 MAX_FILES = 10000
@@ -53,29 +52,6 @@ def _write(path, content):
         stream.write(content)
         stream.flush()
         os.fsync(stream.fileno())
-
-
-@contextmanager
-def _identity_guard(path):
-    # A data-read handle enforces delete-sharing denial; metadata-only handles
-    # are insufficient on Windows. SQLite may read/write the same pinned file.
-    try:
-        expected = path_identity.regular_path_identity(path)
-        native = windows_native.api()
-        handle = windows_native.open_handle(
-            path,
-            directory=False,
-            access=native.GENERIC_READ,
-            share=native.FILE_SHARE_READ | native.FILE_SHARE_WRITE,
-        )
-    except (OSError, DocumentError):
-        raise AppError("POLICY_DENIED") from None
-    try:
-        if windows_native.handle_identity(handle) != expected:
-            raise AppError("SOURCE_CHANGED")
-        yield
-    finally:
-        path_identity.close_guard(handle)
 
 
 @contextmanager
@@ -125,6 +101,8 @@ def _integrity(conn):
 
 def doctor(config_path):
     """Only local presence/health checks: no secret decryption or provider probe."""
+    from .platform import doctor as platform_doctor
+
     settings = config.load_config(config_path)
     home = config.home_path(settings, config_path)
     validate_root(home)
@@ -140,9 +118,11 @@ def doctor(config_path):
             database = "ok"
         except (AppError, sqlite3.Error, ValueError):
             database = "invalid"
+    platform_checks = platform_doctor.checks()
     return {
         "format_version": 1,
-        "ok": database != "invalid" and os.name == "nt",
+        "ok": database != "invalid" and all(platform_checks.values()),
+        "platform_checks": platform_checks,
         "database": database,
         "disk_free_bytes": shutil.disk_usage(existing).free,
         "timezone": ZoneInfo("Asia/Seoul").key,

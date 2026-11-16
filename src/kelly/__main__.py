@@ -32,7 +32,7 @@ def main(argv=None):
     restore.add_argument("--input", type=Path, required=True)
     restore.add_argument("--home", type=Path, required=True)
     startup = commands.add_parser("startup", help="현재 사용자 로그인 시 시작 설정")
-    startup.add_argument("action", choices=("enable", "disable", "status"))
+    startup.add_argument("action", choices=("enable", "disable", "install", "uninstall", "status"))
     startup.add_argument("--config", type=Path, default=Path("config.json"))
     stop = commands.add_parser("stop", help="인증된 로컬 요청으로 정상 종료")
     stop.add_argument("--config", type=Path, default=Path("config.json"))
