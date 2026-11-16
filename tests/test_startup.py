@@ -16,6 +16,7 @@ from test_cli import ROOT, _environment, _free_port
 from kelly import config, engine, startup
 from kelly.api import create_app
 from kelly.contracts import AppError
+from kelly.platform import _windows_service
 
 
 @pytest.fixture
@@ -25,20 +26,24 @@ def workspace(tmp_path):
     return path, tmp_path / "data"
 
 
-def test_registration_tool_commands_are_explicit_current_user_and_exact_scope(workspace):
+def test_registration_tool_commands_are_explicit_current_user_and_exact_scope(workspace, monkeypatch):
     path, home = workspace
+    # Exercise the unchanged Windows backend on either host with a synthetic executable.
+    if os.name != "nt":
+        (path.parent / "pythonw.exe").write_bytes(b"synthetic executable")
+        monkeypatch.setattr(sys, "executable", str(path.parent / "python.exe"))
     commands = []
 
     def task_tool(script):
         commands.append(script)
         return {"state": "enabled" if "Register-ScheduledTask -" in script else "disabled"}
 
-    status = startup.manage(path, "status", task_runner=task_tool)
+    status = _windows_service.manage(path, "status", task_runner=task_tool)
     assert status["state"] == "disabled"
     assert "Register-ScheduledTask -" not in commands[-1]
     assert "Unregister-ScheduledTask -" not in commands[-1]
     assert not home.exists()
-    enabled = startup.manage(path, "enable", task_runner=task_tool)
+    enabled = _windows_service.manage(path, "enable", task_runner=task_tool)
     command = commands[-1]
     assert enabled["state"] == "enabled" and enabled["task_name"] == status["task_name"]
     for required in (
@@ -57,14 +62,14 @@ def test_registration_tool_commands_are_explicit_current_user_and_exact_scope(wo
         assert required in command
     assert "Start-ScheduledTask" not in command
     assert "-Password" not in command and "-RunLevel Highest" not in command
-    disabled = startup.manage(path, "disable", task_runner=task_tool)
+    disabled = _windows_service.manage(path, "disable", task_runner=task_tool)
     assert disabled["state"] == "disabled"
     assert "Unregister-ScheduledTask -TaskPath '\\' -TaskName $name" in commands[-1]
     assert "Stop-ScheduledTask" not in commands[-1]
     with pytest.raises(AppError) as error:
-        startup.manage(path, "enable", task_runner=lambda _: {"state": "conflict"})
+        _windows_service.manage(path, "enable", task_runner=lambda _: {"state": "conflict"})
     assert error.value.code == "CONFLICT"
-    assert startup._literal("a' ; $(anything)") == "'a'' ; $(anything)'"
+    assert _windows_service._literal("a' ; $(anything)") == "'a'' ; $(anything)'"
 
 
 def test_stop_endpoint_rejects_unauthenticated_requests_and_unconfigured_host(workspace):
@@ -92,6 +97,8 @@ def test_stop_endpoint_rejects_unauthenticated_requests_and_unconfigured_host(wo
 
 
 def test_registration_timeout_reports_unknown_without_command_or_path(monkeypatch, workspace):
+    monkeypatch.setattr(Path, "home", lambda: workspace[0].parent)
+
     def timed_out(command, **kwargs):
         raise subprocess.TimeoutExpired(command, 30, output="private-path-and-command")
 
@@ -127,7 +134,7 @@ def test_stop_timeout_preserves_live_lock_and_reports_unknown(workspace):
 def test_actual_pythonw_hidden_server_authenticates_stop_and_flushes_logs(workspace):
     path, home = workspace
     port = config.load_config(path).port
-    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    pythonw = Path(sys.executable).with_name("pythonw.exe") if os.name == "nt" else Path(sys.executable)
     process = subprocess.Popen(
         [str(pythonw), "-m", "kelly.startup", "--run", str(path)],
         cwd=ROOT,
@@ -135,7 +142,7 @@ def test_actual_pythonw_hidden_server_authenticates_stop_and_flushes_logs(worksp
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     try:
         with httpx.Client(
@@ -166,7 +173,7 @@ def test_actual_pythonw_hidden_server_authenticates_stop_and_flushes_logs(worksp
             encoding="utf-8",
             check=False,
             timeout=45,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         assert stopped.returncode == 0
         assert json.loads(stopped.stdout) == {"state": "stopped"}
@@ -257,13 +264,16 @@ def test_log_expiry_preserves_open_files_hardlinks_and_junctions(tmp_path):
     alias = logs / "server.stdout.2026-01-01.log"
     os.link(source, alias)
     junction = logs / "server.stdout.2026-01-02.log"
-    created = subprocess.run(
-        ["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
-        capture_output=True,
-        check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
-    assert created.returncode == 0
+    if os.name == "nt":
+        created = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
+            capture_output=True,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert created.returncode == 0
+    else:
+        junction.symlink_to(outside, target_is_directory=True)
     busy = logs / "server.stdout.log"
     busy.write_text("older daemon", encoding="utf-8")
     os.utime(busy, (0, 0))

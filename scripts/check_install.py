@@ -1,5 +1,6 @@
 """Install the locked runtime; verify restart, recovery, local key removal and uninstall."""
 
+import ctypes as c
 import hashlib
 import json
 import os
@@ -11,6 +12,8 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -25,6 +28,8 @@ def environment():
         "USERPROFILE",
         "LOCALAPPDATA",
         "UV_CACHE_DIR",
+        "HOME",
+        "KELLY_KEYCHAIN_PATH",
     )
     value = {key: os.environ[key] for key in names if key in os.environ}
     value.update(PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
@@ -41,7 +46,7 @@ def run(command, *, cwd, timeout=120):
         encoding="utf-8",
         check=False,
         timeout=timeout,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     if result.returncode:
         # Dependency tool diagnostics can include user-specific cache paths.
@@ -61,7 +66,7 @@ def server_cycle(entrypoint, config_path, work, port):
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     try:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -95,15 +100,13 @@ def server_cycle(entrypoint, config_path, work, port):
 
 
 def main():
-    if os.name != "nt":
-        raise RuntimeError("This check requires Windows")
+    if sys.platform not in {"win32", "darwin"}:
+        raise RuntimeError("This check requires Windows or macOS")
     root = Path(__file__).resolve().parents[1]
     uv = shutil.which("uv")
     if uv is None:
         raise RuntimeError("uv is required; no automatic tool installation")
-    evidence = root / ".birkin-lite"
-    evidence.mkdir(exist_ok=True)
-    work = Path(tempfile.mkdtemp(prefix="install-check-", dir=evidence))
+    work = Path(tempfile.mkdtemp(prefix="kelly-install-check-")).resolve()
     original_lock = hashlib.sha256((root / "uv.lock").read_bytes()).hexdigest()
     requirements, dist, venv = work / "requirements.txt", work / "dist", work / "venv"
     run(
@@ -121,8 +124,8 @@ def main():
     run([uv, "build", "--wheel", "--offline", "--out-dir", str(dist)], cwd=root)
     (wheel,) = dist.glob("*.whl")
     run([uv, "venv", "--python", sys.executable, str(venv)], cwd=root)
-    python = venv / "Scripts" / "python.exe"
-    entrypoint = venv / "Scripts" / "kelly.exe"
+    python = venv / "Scripts" / "python.exe" if os.name == "nt" else venv / "bin" / "python"
+    entrypoint = venv / "Scripts" / "kelly.exe" if os.name == "nt" else venv / "bin" / "kelly"
     run(
         [
             uv,
@@ -228,7 +231,7 @@ assert not (Path(sys.argv[3]) / 'auth').exists()
         raise RuntimeError("Restored doctor did not pass without credentials")
     server_cycle(entrypoint, restored_config, work, port)
     run([uv, "pip", "uninstall", "--python", str(python), "kelly-office-agent"], cwd=work)
-    if entrypoint.exists() or entrypoint.with_name("blite.exe").exists():
+    if entrypoint.exists() or entrypoint.with_name("blite.exe" if os.name == "nt" else "blite").exists():
         raise RuntimeError("Uninstall left an entrypoint behind")
     run(
         [
@@ -247,7 +250,7 @@ assert not (Path(sys.argv[3]) / 'auth').exists()
         ):
             raise RuntimeError("Recovery or uninstall changed the managed source")
     report = {
-        "scope": "isolated_venv_on_existing_windows_host",
+        "scope": "isolated_venv_on_existing_" + sys.platform + "_host",
         "distribution": "kelly-office-agent",
         "entrypoint": "kelly",
         "wheel_sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
@@ -271,8 +274,49 @@ assert not (Path(sys.argv[3]) / 'auth').exists()
         "data_preserved": (work / "data" / "state.db").is_file(),
     }
     (work / "result.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-    print(json.dumps({"evidence": str(work.relative_to(root) / "result.json"), **report}))
+    print(json.dumps({"evidence": str(work / "result.json"), **report}))
+
+
+@contextmanager
+def isolated_keychain():
+    """Installer checks never read or modify the login/default keychain."""
+    if sys.platform != "darwin":
+        yield
+        return
+    security = c.CDLL("/System/Library/Frameworks/Security.framework/Security")
+    core = c.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+    core.CFRelease.argtypes = [c.c_void_p]
+    core.CFRelease.restype = None
+    security.SecKeychainCreate.argtypes = [
+        c.c_char_p, c.c_uint32, c.c_void_p, c.c_ubyte, c.c_void_p, c.POINTER(c.c_void_p),
+    ]
+    security.SecKeychainUnlock.argtypes = [c.c_void_p, c.c_uint32, c.c_void_p, c.c_ubyte]
+    security.SecKeychainDelete.argtypes = [c.c_void_p]
+    with tempfile.TemporaryDirectory(prefix="kelly-install-keychain-") as folder:
+        path = Path(folder) / "check.keychain-db"
+        password = uuid.uuid4().hex.encode()
+        handle = c.c_void_p()
+        if security.SecKeychainCreate(
+            bytes(path), len(password), password, False, None, c.byref(handle),
+        ):
+            raise RuntimeError("Disposable keychain creation failed")
+        previous = os.environ.get("KELLY_KEYCHAIN_PATH")
+        try:
+            if security.SecKeychainUnlock(handle, len(password), password, True):
+                raise RuntimeError("Disposable keychain unlock failed")
+            os.environ["KELLY_KEYCHAIN_PATH"] = str(path)
+            yield
+        finally:
+            if previous is None:
+                os.environ.pop("KELLY_KEYCHAIN_PATH", None)
+            else:
+                os.environ["KELLY_KEYCHAIN_PATH"] = previous
+            deleted = security.SecKeychainDelete(handle)
+            core.CFRelease(handle)
+            if deleted:
+                raise RuntimeError("Disposable keychain deletion failed")
 
 
 if __name__ == "__main__":
-    main()
+    with isolated_keychain():
+        main()

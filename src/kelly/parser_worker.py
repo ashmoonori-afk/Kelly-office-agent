@@ -164,7 +164,8 @@ def main():
             import resource
 
             memory = int(sys.argv[1]) * 1024 * 1024
-            resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
+            if sys.platform != "darwin":
+                resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
             resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
         # Parent assigns the Windows Job before writing anything to this pipe.
         raw = sys.stdin.buffer.read(64 * 1024 + 1)

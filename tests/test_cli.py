@@ -27,7 +27,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _environment():
     # An allowlist excludes real provider credentials and proxy configuration.
-    names = ("SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATH", "PATHEXT", "USERPROFILE")
+    names = (
+        "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATH", "PATHEXT", "USERPROFILE",
+        "KELLY_KEYCHAIN_PATH",
+    )
     env = {name: os.environ[name] for name in names if name in os.environ}
     env.update(PYTHONPATH=str(ROOT / "src"), PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
     return env

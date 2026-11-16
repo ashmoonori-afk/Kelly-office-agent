@@ -259,22 +259,25 @@ def folder_case(case, conn, directory, trace):
         content = case.sources[0].text.encode("utf-8")
         source.write_bytes(content)
         alias = folder / "alias"
-        subprocess.run(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "New-Item -ItemType Junction -Path $env:EVAL_JUNCTION -Target $env:EVAL_TARGET",
-            ],
-            env=os.environ | {"EVAL_JUNCTION": str(alias), "EVAL_TARGET": str(target)},
-            check=True,
-            capture_output=True,
-            timeout=30,
-        )
+        if sys.platform == "win32":
+            subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "New-Item -ItemType Junction -Path $env:EVAL_JUNCTION -Target $env:EVAL_TARGET",
+                ],
+                env=os.environ | {"EVAL_JUNCTION": str(alias), "EVAL_TARGET": str(target)},
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+        else:
+            alias.symlink_to(target, target_is_directory=True)
         try:
-            if not alias.is_junction():
-                raise ValueError("native junction fixture missing")
+            if not (alias.is_junction() or alias.is_symlink()):
+                raise ValueError("native directory alias fixture missing")
             with observe_read_boundary() as read_observation:
                 state = tick(first)
             unchanged = source.read_bytes() == content
@@ -294,7 +297,9 @@ def folder_case(case, conn, directory, trace):
                 "error": state.get("last_error"),
             }
         finally:
-            if alias.is_junction():
+            if alias.is_symlink():
+                alias.unlink()
+            elif alias.is_junction():
                 alias.rmdir()  # Remove only this owned link, never the target directory.
 
     source = folder / events[0].get("name", "source.txt")
