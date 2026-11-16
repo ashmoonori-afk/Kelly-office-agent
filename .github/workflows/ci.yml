@@ -1,4 +1,4 @@
-name: Windows checks
+name: CI
 
 on:
   push:
@@ -10,11 +10,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  windows:
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
