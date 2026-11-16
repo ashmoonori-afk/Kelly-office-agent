@@ -13,7 +13,6 @@ from pydantic import JsonValue, ValidationError
 from ..artifacts import metadata, open_artifact
 from ..contracts import Actor, AppError, RunRequest, canonical_json, digest
 from ..db import (
-    automation_proposal_hash,
     create_run,
     get_automation,
     get_run,
@@ -25,7 +24,8 @@ from ..db import (
     set_value,
     transaction,
 )
-from ..engine import resolve_approval
+from ..migrations import sync_binding
+from . import actions, notices
 from .base import (
     Action,
     ChannelAdapter,
@@ -33,6 +33,7 @@ from .base import (
     ChannelError,
     InboundEvent,
     OutboundMessage,
+    SentRef,
     _markup,
     _message_text,
     _private_id,
@@ -71,6 +72,7 @@ def _bind_client(conn, actor, connection_id, client, now):
                 set_value(conn, "telegram:cursor:" + connection_id, 0, now=now.isoformat())
             connection["credential_fingerprint"] = client.credential_fingerprint
             set_value(conn, "telegram:connection:" + connection_id, connection, now=now.isoformat())
+        sync_binding(conn, connection, now.isoformat())
         return connection
 
 
@@ -102,6 +104,7 @@ def register_connection(conn, actor, connection_id, project_id, *, now, client=N
             "chat_id": None,
         }
         set_value(conn, "telegram:connection:" + connection_id, value, now=now.isoformat())
+        sync_binding(conn, value, now.isoformat())
         return (
             _bind_client(conn, actor, connection_id, client, now) if client is not None else value
         )
@@ -166,53 +169,16 @@ def _pair(conn, connection, code, user_id, chat_id, now):
         "revision": connection["revision"] + 1,
     }
     set_value(conn, "telegram:connection:" + connection["id"], connection, now=now.isoformat())
+    sync_binding(conn, connection, now.isoformat())
 
 
 def create_callback(conn, actor, connection_id, *, kind, target_id, decision="approve", now):
     now = _now(now)
-    if (
-        kind not in {"approval", "automation_enable"}
-        or decision not in {"approve", "reject"}
-        or (kind == "automation_enable" and decision != "approve")
-    ):
-        raise AppError("INVALID_INPUT")
-    with transaction(conn):
+    with nullcontext(conn) if conn.in_transaction else transaction(conn):
         connection = _connection(conn, actor, connection_id, paired=True)
-        expiry = now + timedelta(minutes=10)
-        if kind == "approval":
-            target = row_dict(
-                conn.execute(
-                    "SELECT * FROM approvals WHERE id=? AND actor_id=?", (target_id, actor.id)
-                ).fetchone()
-            )
-            if target is None:
-                raise AppError("NOT_FOUND", status=404)
-            run = get_run(conn, target["run_id"], actor)
-            if target["state"] != "pending" or run["state"] != "awaiting_approval":
-                raise AppError("CONFLICT", status=409)
-            project_id, proposal_hash = run["project_id"], target["proposal_hash"]
-            expiry = min(expiry, datetime.fromisoformat(target["expires_at"]))
-        else:
-            target = get_automation(conn, target_id, actor)
-            project_id, proposal_hash = target["project_id"], automation_proposal_hash(target)
-        if project_id != connection["project_id"] or expiry <= now:
-            raise AppError("POLICY_DENIED")
-        opaque = secrets.token_urlsafe(18)
-        ref = {
-            "kind": kind,
-            "target_id": target_id,
-            "decision": decision,
-            "actor_id": actor.id,
-            "project_id": project_id,
-            "connection_id": connection_id,
-            "pairing_revision": connection["revision"],
-            "proposal_hash": proposal_hash,
-            "expected_revision": target["revision"],
-            "expires_at": expiry.isoformat(),
-            "used": False,
-        }
-        set_value(conn, "telegram:callback:" + opaque, ref, now=now.isoformat())
-    return decision + ":" + opaque
+        return actions.create(
+            conn, actor, connection, kind=kind, target_id=target_id, decision=decision, now=now
+        )
 
 
 def enable_automation(
@@ -250,59 +216,7 @@ def enable_automation(
 
 
 def _callback(conn, actor, connection, data, now):
-    if not isinstance(data, str) or not re.fullmatch(
-        r"(?:approve|reject):[A-Za-z0-9_-]{20,40}", data
-    ):
-        raise AppError("POLICY_DENIED")
-    decision, opaque = data.split(":", 1)
-    key = "telegram:callback:" + opaque
-    ref = get_value(conn, key)
-    if (
-        not isinstance(ref, dict)
-        or ref.get("used") is not False
-        or (
-            ref.get("actor_id"),
-            ref.get("project_id"),
-            ref.get("connection_id"),
-            ref.get("pairing_revision"),
-            ref.get("decision"),
-        )
-        != (actor.id, connection["project_id"], connection["id"], connection["revision"], decision)
-    ):
-        raise AppError("POLICY_DENIED")
-    if datetime.fromisoformat(ref["expires_at"]) <= now:
-        raise AppError("APPROVAL_EXPIRED", status=410)
-    try:
-        if ref["kind"] == "approval":
-            result = resolve_approval(
-                conn,
-                ref["target_id"],
-                actor,
-                decision,
-                ref["proposal_hash"],
-                ref["expected_revision"],
-                now=now,
-            )
-        elif ref["kind"] == "automation_enable":
-            result = enable_automation(
-                conn,
-                actor,
-                connection["id"],
-                ref["target_id"],
-                expected_revision=ref["expected_revision"],
-                confirmed_hash=ref["proposal_hash"],
-                now=now,
-            )
-        else:
-            raise AppError("POLICY_DENIED")
-    except AppError as error:
-        if error.code == "APPROVAL_EXPIRED":
-            ref["used"] = True
-            set_value(conn, key, ref, now=now.isoformat())
-        raise
-    ref["used"] = True
-    set_value(conn, key, ref, now=now.isoformat())
-    return result
+    return actions.consume(conn, actor, connection, data, now=now, enable=enable_automation)
 
 
 def ingest_event(conn, actor: Actor, connection_id, event: InboundEvent, *, now, client=None):
@@ -312,7 +226,9 @@ def ingest_event(conn, actor: Actor, connection_id, event: InboundEvent, *, now,
         _bind_client(conn, actor, connection_id, client, now)
     if event.byte_size <= 65536 and event.kind == "action" and client is not None:
         try:
-            client.ack(event)
+            client.ack(actions.acknowledgement(
+                conn, actor, _connection(conn, actor, connection_id), event
+            ))
         except (ChannelError, AppError):
             pass  # A lost UI acknowledgement never grants or blocks durable authorization.
     with transaction(conn):
@@ -518,7 +434,8 @@ def _deliverable_artifact(conn, actor, run_id, artifact_id):
 
 
 def prepare_delivery(
-    conn, actor, connection_id, run_id, *, text="", artifact_id=None, reply_markup=None, now
+    conn, actor, connection_id, run_id, *, text="", artifact_id=None, reply_markup=None, now,
+    notice_id=None, notice_role=None, update_ref=None,
 ):
     now = _now(now)
     if text:
@@ -529,8 +446,12 @@ def prepare_delivery(
         _markup(reply_markup)
         if artifact_id is not None:
             raise AppError("INVALID_INPUT")
-    with transaction(conn):
-        authority = _delivery_authority(conn, actor, connection_id, run_id)
+    with nullcontext(conn) if conn.in_transaction else transaction(conn):
+        authority = (
+            notices.authority(conn, actor, _connection(conn, actor, connection_id, paired=True),
+                              run_id, notice_id)
+            if notice_id else _delivery_authority(conn, actor, connection_id, run_id)
+        )
         payload = {
             "text": text,
             "artifact_id": artifact_id,
@@ -538,12 +459,16 @@ def prepare_delivery(
             "filename": None,
             "reply_markup": reply_markup,
         }
+        if notice_id:
+            payload.update(notice_id=notice_id, notice_role=notice_role, update_ref=update_ref)
         if artifact_id is not None:
             artifact = _deliverable_artifact(conn, actor, run_id, artifact_id)
             payload.update(
                 artifact_hash=artifact["sha256"], filename=artifact["provenance_json"]["filename"]
             )
         content_hash, kind = digest(payload), "document" if artifact_id else "message"
+        if notice_id:
+            kind = "approval_" + notice_role
         old = row_dict(
             conn.execute(
                 "SELECT * FROM outbox WHERE run_id=? AND delivery_kind=? AND recipient_ref='owner' AND content_hash=?",
@@ -626,9 +551,20 @@ def deliver_once(client, conn, home, actor, *, now, connection_id=None, before_s
             with transaction(conn):
                 if before_send is not None:
                     before_send()
-                current = _delivery_authority(
-                    conn, actor, authority["connection_id"], row["run_id"]
+                current = (
+                    notices.authority(
+                        conn, actor, _connection(conn, actor, authority["connection_id"], paired=True),
+                        row["run_id"], payload["notice_id"],
+                    ) if payload.get("notice_id") else
+                    _delivery_authority(conn, actor, authority["connection_id"], row["run_id"])
                 )
+                if payload.get("notice_role") == "card":
+                    approval = conn.execute(
+                        "SELECT a.state,a.expires_at FROM approvals a JOIN approval_notices n "
+                        "ON n.approval_id=a.id WHERE n.id=?", (payload["notice_id"],)
+                    ).fetchone()
+                    if approval["state"] != "pending" or datetime.fromisoformat(approval["expires_at"]) <= now:
+                        raise AppError("APPROVAL_EXPIRED", status=410)
                 if current != authority or digest(payload) != row["content_hash"]:
                     raise AppError("POLICY_DENIED")
                 claimed = conn.execute(
@@ -637,13 +573,23 @@ def deliver_once(client, conn, home, actor, *, now, connection_id=None, before_s
                 )
                 if claimed.rowcount != 1:
                     raise AppError("CONFLICT", status=409)
-            result = client.send(ChannelAddress(authority["chat_id"]), message)
+            if payload.get("update_ref"):
+                result = SentRef(ChannelAddress(authority["chat_id"]), payload["update_ref"])
+                client.update(result, message)
+            else:
+                result = client.send(ChannelAddress(authority["chat_id"]), message)
             sent = True
         with transaction(conn):
             conn.execute(
                 "UPDATE outbox SET state='sent',remote_id=?,sent_at=?,error_code=NULL WHERE id=? AND state='sending'",
                 (result.message_id, now.isoformat(), row["id"]),
             )
+            if payload.get("notice_role") in {"card", "outcome"}:
+                conn.execute(
+                    "UPDATE approval_notices SET sent_ref=?,state=? WHERE id=?",
+                    (result.message_id, "sent" if payload["notice_role"] == "card" else "updated",
+                     payload["notice_id"]),
+                )
     except (ChannelError, AppError, OSError) as error:
         code = error.code if isinstance(error, AppError) else "SOURCE_CHANGED"
         with transaction(conn):
@@ -682,54 +628,21 @@ def ingest_update(conn, actor, connection_id, update, *, now, client=None):
 
 
 def queue_results(conn, actor, connection_id, adapter: ChannelAdapter, *, now):
+    notices.queue(
+        conn, actor, _connection(conn, actor, connection_id), adapter, now=now(),
+        enqueue=prepare_delivery,
+    )
     rows = conn.execute(
         "SELECT * FROM runs WHERE actor_id=? AND source IN ('telegram','automation') "
-        "AND state IN ('succeeded','awaiting_approval','awaiting_input','failed','expired',"
+        "AND state IN ('succeeded','awaiting_input','failed','expired',"
         "'rejected') AND COALESCE(json_extract(result_json,'$.archived'),0)=0 ORDER BY created_at,id",
         (actor.id,),
     ).fetchall()
     for row in rows:
         run = row_dict(row)
         try:
-            markup = None
-            if run["state"] == "awaiting_approval":
-                if not adapter.caps.buttons:
-                    raise AppError("UNSUPPORTED_CAPABILITY")
-                approval = row_dict(
-                    conn.execute(
-                        "SELECT * FROM approvals WHERE run_id=? AND state='pending' "
-                        "AND expires_at>? ORDER BY created_at LIMIT 1",
-                        (run["id"], now().isoformat()),
-                    ).fetchone()
-                )
-                if approval is None:
-                    continue
-                key = "telegram:approval_notice:" + approval["id"]
-                markup = get_value(conn, key)
-                if markup is None:
-                    markup = {
-                        "inline_keyboard": [
-                            [
-                                {
-                                    "text": text,
-                                    "callback_data": create_callback(
-                                        conn,
-                                        actor,
-                                        connection_id,
-                                        kind="approval",
-                                        target_id=approval["id"],
-                                        decision=decision,
-                                        now=now(),
-                                    ),
-                                }
-                                for text, decision in (("승인", "approve"), ("거절", "reject"))
-                            ]
-                        ]
-                    }
-                    set_value(conn, key, markup)
             status = {
                 "succeeded": "업무를 완료했습니다.",
-                "awaiting_approval": "업무 실행 승인이 필요합니다.",
                 "awaiting_input": "업무에 필요한 입력을 화면에서 보완해 주세요.",
                 "failed": "업무를 완료하지 못했습니다. 화면에서 상태를 확인해 주세요.",
                 "expired": "업무 승인이 만료되었습니다.",
@@ -741,7 +654,6 @@ def queue_results(conn, actor, connection_id, adapter: ChannelAdapter, *, now):
                 connection_id,
                 run["id"],
                 text=status,
-                reply_markup=markup,
                 now=now(),
             )
             if run["state"] == "succeeded":

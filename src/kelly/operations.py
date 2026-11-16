@@ -119,7 +119,7 @@ def _integrity(conn):
     if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
         raise AppError("INVALID_INPUT")
     row = conn.execute("SELECT value_json FROM kv WHERE key='schema_version'").fetchone()
-    if row is None or json.loads(row[0]) != 1:
+    if row is None or json.loads(row[0]) not in {1, 2}:
         raise AppError("SCHEMA_VERSION")
 
 

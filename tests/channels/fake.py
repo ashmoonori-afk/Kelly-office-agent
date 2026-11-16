@@ -23,6 +23,7 @@ class FakeAdapter:
         self.messages: dict[str, OutboundMessage] = {}
         self.files: dict[str, bytes] = {}
         self.acknowledged: list[str | None] = []
+        self.ack_texts: list[str | None] = []
         self.cursors: list[str | None] = []
         self.send_calls = 0
 
@@ -54,3 +55,4 @@ class FakeAdapter:
     def ack(self, event: InboundEvent) -> None:
         if event.kind == "action":
             self.acknowledged.append(event.ack_id)
+            self.ack_texts.append(event.ack_text)

@@ -52,12 +52,12 @@ def test_constraints_revisions_and_rollback(tmp_path):
     assert conn.execute("SELECT * FROM kv WHERE key='temp'").fetchone() is None
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert not conn.execute("PRAGMA foreign_key_check").fetchall()
-    assert len(conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()) == 9
+    assert len(conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()) == 12
     assert (
         json.loads(
             conn.execute("SELECT value_json FROM kv WHERE key='schema_version'").fetchone()[0]
         )
-        == 1
+        == 2
     )
     conn.close()
 

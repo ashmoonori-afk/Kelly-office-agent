@@ -1,5 +1,15 @@
 # Third-party source and security boundary
 
+## Approval channel changes
+
+`src/kelly/channels/actions.py` adapts the callback creation and consumption from
+`src/kelly/channels/router.py` at Kelly commit `24b59a4`: durable hashed actions,
+approval-lifetime expiry and decision provenance replace callback `kv` rows.
+`src/kelly/channels/notices.py` replaces the approval portion of that router's
+`queue_results` with cards for all sources and durable outcome/result delivery.
+These are internal Kelly adaptations; no third-party code or runtime dependency
+was added for C2.
+
 Birkin Lite vendors a small subset of Birkin under `src/kelly/_vendor/office/`.
 Upstream repository: https://github.com/ashmoonori-afk/birkin . Inspected checkout HEAD:
 `16fe5dad52920837366ceff6e440c41e871031ce`. The byte hashes below identify the actual copied local sources,

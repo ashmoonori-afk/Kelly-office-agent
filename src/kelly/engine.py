@@ -421,7 +421,10 @@ def _proposal(conn, run, row, todo, inputs, actor, *, expires_at):
     ).model_dump()
 
 
-def resolve_approval(conn, approval_id, actor, decision, proposal_hash, expected_revision, *, now):
+def resolve_approval(
+    conn, approval_id, actor, decision, proposal_hash, expected_revision, *,
+    now, resolved_by=None, resolved_via="web", reject_reason=None,
+):
     if decision not in {"approve", "reject"} or type(expected_revision) is not int:
         raise AppError("INVALID_INPUT")
     expired = False
@@ -444,8 +447,9 @@ def resolve_approval(conn, approval_id, actor, decision, proposal_hash, expected
         expired = datetime.fromisoformat(row["expires_at"]) <= now
         state = "expired" if expired else "approved" if decision == "approve" else "rejected"
         conn.execute(
-            "UPDATE approvals SET state=?,resolved_at=?,revision=revision+1 WHERE id=?",
-            (state, now.isoformat(), approval_id),
+            "UPDATE approvals SET state=?,resolved_at=?,resolved_by=?,resolved_via=?,"
+            "reject_reason=?,revision=revision+1 WHERE id=?",
+            (state, now.isoformat(), resolved_by or actor.id, resolved_via, reject_reason, approval_id),
         )
         if state in {"expired", "rejected"}:
             transition_run(conn, run["id"], "awaiting_approval", state)
