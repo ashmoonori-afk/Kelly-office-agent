@@ -1,6 +1,6 @@
 import hashlib
 import json
-import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -366,7 +366,7 @@ def test_explicit_probe_can_precede_qualification_without_enabling_normal_routin
     assert value.models[0].binding.available is False
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Actual current-user Windows DPAPI")
+@pytest.mark.skipif(sys.platform not in {"win32", "darwin"}, reason="Native secret store")
 @pytest.mark.parametrize("provider", ["xai", "telegram", "bootstrap", "commandcode"])
 def test_dpapi_roundtrip_replace_delete_never_writes_plaintext(
     tmp_path, monkeypatch, caplog, provider
@@ -398,7 +398,7 @@ def test_dpapi_roundtrip_replace_delete_never_writes_plaintext(
     assert second not in caplog.text
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Actual current-user Windows DPAPI")
+@pytest.mark.skipif(sys.platform not in {"win32", "darwin"}, reason="Native secret store")
 def test_dpapi_tampered_ciphertext_is_rejected_without_secret_echo(tmp_path, monkeypatch):
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     plain = "SYNTHETIC_TAMPER_TEST_KEY_NO_REMOTE_USE"
@@ -413,7 +413,7 @@ def test_dpapi_tampered_ciphertext_is_rejected_without_secret_echo(tmp_path, mon
     assert plain not in str(rejected.value) and str(path) not in str(rejected.value)
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Actual current-user Windows DPAPI")
+@pytest.mark.skipif(sys.platform not in {"win32", "darwin"}, reason="Native secret store")
 @pytest.mark.parametrize("target", ["telegram", "bootstrap", "commandcode"])
 def test_dpapi_ciphertext_cannot_be_copied_to_another_secret_slot(tmp_path, target):
     plain = "123456:" + "synthetic-cross-slot-key-" * 2
@@ -427,7 +427,7 @@ def test_dpapi_ciphertext_cannot_be_copied_to_another_secret_slot(tmp_path, targ
     assert stored_secret(tmp_path, "xai").get_secret_value() == plain
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Actual current-user Windows DPAPI")
+@pytest.mark.skipif(sys.platform not in {"win32", "darwin"}, reason="Native secret store")
 @pytest.mark.parametrize(
     ("provider", "environment", "reader"),
     [

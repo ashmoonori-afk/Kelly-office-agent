@@ -3,7 +3,6 @@
 import hashlib
 import json
 import os
-import re
 import uuid
 from pathlib import Path
 from typing import Annotated, Literal
@@ -26,10 +25,25 @@ from .contracts import (
     Usage,
     canonical_json,
 )
-from .safe_io import ensure_directory, guard_directory, open_regular, rename_new, validate_root
+from .platform.secrets import store as secret_store
+from .platform.secrets.store import (
+    validate_secret as _validate_secret,
+)
+from .safe_io import (
+    ensure_directory,
+    guard_directory,
+    open_new,
+    open_regular,
+    rename_new,
+    unlink_file,
+    validate_root,
+)
 
 MAX_CONFIG_BYTES = 65536
 MAX_EVALUATION_BYTES = 2 * 1024 * 1024
+
+store_secret = secret_store.store_secret
+stored_secret = secret_store.stored_secret
 
 
 class ModelProfile(StrictModel):
@@ -210,118 +224,14 @@ def create_config(path, config: AppConfig) -> str:
     temp = path.with_name(f".config-{uuid.uuid4().hex}.tmp")
     with guard_directory(path.parent):
         try:
-            with temp.open("xb") as stream:
+            with open_new(temp) as stream:
                 stream.write(data)
                 stream.flush()
                 os.fsync(stream.fileno())
             rename_new(temp, path, expected_sha256=sha256)
         finally:
-            if temp.exists():
-                temp.unlink()
+            unlink_file(temp, missing_ok=True)
     return sha256
-
-
-def _crypt_secret(data, *, protect):
-    """Windows current-user DPAPI; never machine-wide and never a UI prompt."""
-    import ctypes
-    from ctypes import wintypes
-
-    if os.name != "nt":
-        raise AppError("UNSUPPORTED_CAPABILITY")
-
-    class Blob(ctypes.Structure):
-        _fields_ = [("size", wintypes.DWORD), ("data", ctypes.POINTER(ctypes.c_ubyte))]
-
-    buffer = ctypes.create_string_buffer(data)
-    source = Blob(len(data), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)))
-    target = Blob()
-    crypt = ctypes.WinDLL("crypt32", use_last_error=True)
-    function = crypt.CryptProtectData if protect else crypt.CryptUnprotectData
-    function.argtypes = [
-        ctypes.POINTER(Blob),
-        ctypes.c_void_p,
-        ctypes.POINTER(Blob),
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        wintypes.DWORD,
-        ctypes.POINTER(Blob),
-    ]
-    function.restype = wintypes.BOOL
-    if not function(ctypes.byref(source), None, None, None, None, 1, ctypes.byref(target)):
-        raise AppError("SECRET_STORE_ERROR")
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel.LocalFree.argtypes = [ctypes.c_void_p]
-    kernel.LocalFree.restype = ctypes.c_void_p
-    try:
-        if target.size > 65536:
-            raise AppError("SECRET_STORE_ERROR")
-        return ctypes.string_at(target.data, target.size)
-    finally:
-        if not protect:
-            ctypes.memset(target.data, 0, target.size)
-        kernel.LocalFree(target.data)
-
-
-def stored_secret(home, provider):
-    if provider not in {"xai", "telegram", "bootstrap", "commandcode"}:
-        raise AppError("INVALID_INPUT")
-    path = Path(home).absolute() / "auth" / (provider + ".dpapi")
-    if not path.exists():
-        return None
-    with open_regular(path, Path(home).absolute()) as stream:
-        data = stream.read(65537)
-    if len(data) > 65536:
-        raise AppError("SECRET_STORE_ERROR")
-    try:
-        value = json.loads(_crypt_secret(data, protect=False))
-        if set(value) != {"provider", "value"} or value["provider"] != provider:
-            raise ValueError("Wrong secret slot")
-        if not isinstance(value["value"], str) or not 1 <= len(value["value"]) <= 8192:
-            raise ValueError("Invalid secret")
-        return SecretStr(value["value"])
-    except (ValueError, TypeError, UnicodeError):
-        raise AppError("SECRET_STORE_ERROR") from None
-
-
-def store_secret(home, provider, value: SecretStr):
-    """Explicit local-user save; plaintext never reaches a file, DB, config or log."""
-    if provider not in {"xai", "telegram", "bootstrap", "commandcode"} or not isinstance(
-        value, SecretStr
-    ):
-        raise AppError("INVALID_INPUT")
-    plain = value.get_secret_value().strip()
-    if plain:
-        _validate_secret(plain, provider)
-    root = Path(home).absolute()
-    folder = ensure_directory(root / "auth")
-    path = folder / (provider + ".dpapi")
-    with guard_directory(folder):
-        if path.exists():
-            with open_regular(path, root):
-                pass
-        if not plain:
-            path.unlink(missing_ok=True)
-            return
-        encrypted = _crypt_secret(
-            canonical_json({"provider": provider, "value": plain}).encode(), protect=True
-        )
-        temp = folder / (uuid.uuid4().hex + ".tmp")
-        try:
-            with temp.open("xb") as stream:
-                stream.write(encrypted)
-                stream.flush()
-                os.fsync(stream.fileno())
-            # This fixed private credential slot is explicitly replaceable, unlike Office outputs.
-            os.replace(temp, path)
-        finally:
-            temp.unlink(missing_ok=True)
-
-
-def _validate_secret(value, provider):
-    if len(value) > 8192 or any(ord(char) < 33 or ord(char) > 126 for char in value):
-        raise AppError("INVALID_INPUT")
-    if provider == "telegram" and not re.fullmatch(r"[0-9]{1,20}:[A-Za-z0-9_-]{20,128}", value):
-        raise AppError("INVALID_INPUT")
 
 
 def _secret_value(home, provider, env_name):
