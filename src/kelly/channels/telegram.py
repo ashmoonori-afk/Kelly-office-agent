@@ -138,12 +138,13 @@ class TelegramClient:
             raise TelegramError("TELEGRAM_INVALID_RESPONSE")
         return result
 
-    def answer_callback_query(self, callback_query_id):
+    def answer_callback_query(self, callback_query_id, text=None):
         if not isinstance(callback_query_id, str) or not 1 <= len(callback_query_id) <= 256:
             raise AppError("INVALID_INPUT")
-        return self._request(
-            "answerCallbackQuery", payload={"callback_query_id": callback_query_id}, timeout=5
-        )
+        payload = {"callback_query_id": callback_query_id}
+        if text is not None:
+            payload["text"] = _message_text(text, 200)
+        return self._request("answerCallbackQuery", payload=payload, timeout=5)
 
     def send_message(self, chat_id, text, reply_markup=None):
         _message_text(text, 4096)
@@ -231,6 +232,7 @@ class TelegramClient:
             "message_id": int(ref.message_id),
             "text": message.text,
             "link_preview_options": {"is_disabled": True},
+            "reply_markup": {"inline_keyboard": []},
         }
         if message.actions:
             payload["reply_markup"] = _markup(
@@ -247,7 +249,7 @@ class TelegramClient:
 
     def ack(self, event: InboundEvent) -> None:
         if event.kind == "action":
-            self.answer_callback_query(event.ack_id)
+            self.answer_callback_query(event.ack_id, event.ack_text)
 
 
 def parse_update(update) -> InboundEvent:

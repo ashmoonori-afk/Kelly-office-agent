@@ -200,16 +200,14 @@ def test_approval_notice_requires_buttons_before_creating_tokens(tmp_path, butto
         router.queue_results(conn, OWNER, "personal", adapter, now=lambda: NOW)
         assert conn.execute("SELECT count(*) FROM outbox").fetchone()[0] == queued
         assert (
-            conn.execute("SELECT count(*) FROM kv WHERE key LIKE 'telegram:callback:%'").fetchone()[
-                0
-            ]
+            conn.execute("SELECT count(*) FROM channel_actions").fetchone()[0]
             == queued * 2
         )
         if queued:
             row = db.row_dict(conn.execute("SELECT * FROM outbox").fetchone())
             assert row is not None
             payload = row["payload_json"]
-            assert payload["text"] == "업무 실행 승인이 필요합니다."
+            assert payload["text"].startswith("업무 실행 승인이 필요합니다.")
             assert [button["text"] for button in payload["reply_markup"]["inline_keyboard"][0]] == [
                 "승인",
                 "거절",

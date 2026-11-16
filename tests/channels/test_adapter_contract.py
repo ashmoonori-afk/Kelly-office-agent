@@ -114,9 +114,10 @@ def channel(request):
                 message_id = str(body.get("message_id", len(texts) + 1))
                 texts[message_id] = body["text"]
                 if "reply_markup" in body:
-                    assert body["reply_markup"] == {
-                        "inline_keyboard": [[{"text": "Approve", "callback_data": ACTION}]]
-                    }
+                    assert body["reply_markup"] == (
+                        {"inline_keyboard": []} if method == "editMessageText" else
+                        {"inline_keyboard": [[{"text": "Approve", "callback_data": ACTION}]]}
+                    )
                 result = {"message_id": int(message_id), "chat": {"id": 101}}
         return httpx.Response(200, json={"ok": True, "result": result})
 

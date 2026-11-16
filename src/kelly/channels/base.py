@@ -43,6 +43,7 @@ class InboundEvent:
     ack_id: str | None = None
     unsupported: bool = False
     error_code: str | None = None
+    ack_text: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

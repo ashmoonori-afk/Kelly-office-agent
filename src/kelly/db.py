@@ -44,9 +44,13 @@ def init_db(path: Path) -> sqlite3.Connection:
         )
     else:
         version = conn.execute("SELECT value_json FROM kv WHERE key='schema_version'").fetchone()
-        if version is None or json.loads(version[0]) != 1:
+        if version is None or json.loads(version[0]) not in {1, 2}:
             conn.close()
             raise AppError("SCHEMA_VERSION")
+    from .migrations import upgrade
+
+    if json.loads(conn.execute("SELECT value_json FROM kv WHERE key='schema_version'").fetchone()[0]) == 1:
+        upgrade(conn)
     return conn
 
 
