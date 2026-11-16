@@ -74,6 +74,6 @@ Windows CI에서 로컬 파일·DB·브라우저·daemon 업무 흐름과 독립
 - [로컬 점검·로그 내보내기·백업·복구](docs/OPERATIONS.md)
 - [30일 보관 정리와 결과 고정](docs/RETENTION.md)
 
-Python import 이름은 `birkin_lite`를 유지합니다. 기존 Birkin 패키지와 별개로 실행됩니다.
+Python import 이름은 `kelly`입니다. 이전 `birkin_lite` import와 `blite` 명령은 한 릴리스 동안 유지합니다. 기존 `blite_session` 쿠키도 같은 기간 허용하며 새 세션은 `kelly_session`을 사용합니다.
 
 [MIT 라이선스](LICENSE) · [외부 코드 고지](docs/THIRD_PARTY.md)

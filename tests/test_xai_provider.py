@@ -3,15 +3,15 @@ import json
 import httpx
 import pytest
 
-from birkin_lite.context import compact_schema
-from birkin_lite.contracts import (
+from kelly.context import compact_schema
+from kelly.contracts import (
     MODEL_OUTPUT_TYPES,
     AppError,
     ModelBinding,
     ModelRequest,
     PlanningResultV1,
 )
-from birkin_lite.providers import (
+from kelly.providers import (
     MAX_RESPONSE_BYTES,
     TransportError,
     XAIClient,

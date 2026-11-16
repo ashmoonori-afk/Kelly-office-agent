@@ -5,9 +5,9 @@ import pytest
 from pydantic import ValidationError
 from test_engine import NOW, OWNER, setup_run
 
-from birkin_lite.contracts import AppError, PlanV1, ValidationResult
-from birkin_lite.db import get_run, init_db
-from birkin_lite.engine import (
+from kelly.contracts import AppError, PlanV1, ValidationResult
+from kelly.db import get_run, init_db
+from kelly.engine import (
     DaemonLock,
     Tool,
     execute_next,
@@ -147,8 +147,8 @@ def test_singleton_lock_is_enforced_across_real_processes(tmp_path):
     code = """
 import sys
 from pathlib import Path
-from birkin_lite.contracts import AppError
-from birkin_lite.engine import DaemonLock
+from kelly.contracts import AppError
+from kelly.engine import DaemonLock
 try:
     with DaemonLock(Path(sys.argv[1])):
         print('ACQUIRED')

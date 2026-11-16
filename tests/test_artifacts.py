@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from birkin_lite.artifacts import create_draft, import_source, open_artifact, publish_draft
-from birkin_lite.contracts import Actor, AppError, RunRequest
-from birkin_lite.db import create_run, init_db
+from kelly.artifacts import create_draft, import_source, open_artifact, publish_draft
+from kelly.contracts import Actor, AppError, RunRequest
+from kelly.db import create_run, init_db
 
 OWNER = Actor(id="owner", project_ids=["sales", "private"])
 

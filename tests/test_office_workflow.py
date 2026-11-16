@@ -6,13 +6,13 @@ from decimal import Decimal
 import pytest
 from openpyxl import load_workbook
 
-from birkin_lite.artifacts import import_source, metadata, open_artifact
-from birkin_lite.contracts import Actor, AppError, PlanV1, RunRequest
-from birkin_lite.db import create_run, get_run, init_db
-from birkin_lite.engine import execute_next, install_plan
-from birkin_lite.tools import registry
-from birkin_lite.verification import numeric_grounding, source_grounding
-from birkin_lite.verification import registry as verifier_registry
+from kelly.artifacts import import_source, metadata, open_artifact
+from kelly.contracts import Actor, AppError, PlanV1, RunRequest
+from kelly.db import create_run, get_run, init_db
+from kelly.engine import execute_next, install_plan
+from kelly.tools import registry
+from kelly.verification import numeric_grounding, source_grounding
+from kelly.verification import registry as verifier_registry
 
 OWNER = Actor(id="owner", project_ids=["sales"])
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
@@ -172,7 +172,7 @@ def test_actual_numeric_verifier_rejects_modified_sum(tmp_path):
 
 
 def test_evidence_locator_is_reloaded_from_actual_source(tmp_path):
-    from birkin_lite import office
+    from kelly import office
 
     conn, home, source, run = setup(tmp_path, "부서,금액\n영업,0.10\n".encode())
     context = {"home": home, "conn": conn, "actor": OWNER, "run": run, "inputs": {}}

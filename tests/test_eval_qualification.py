@@ -8,11 +8,11 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from birkin_lite import config, db
-from birkin_lite.contracts import AppError, ModelBinding, PrivacyPolicy, digest
 from evals import qualification as q
 from evals.execute import task_spec
 from evals.run import blind_id, load_cases
+from kelly import config, db
+from kelly.contracts import AppError, ModelBinding, PrivacyPolicy, digest
 
 
 def configured(tmp_path):

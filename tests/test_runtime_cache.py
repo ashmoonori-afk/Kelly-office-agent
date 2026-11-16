@@ -5,14 +5,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from birkin_lite import office
-from birkin_lite import tools as tool_module
-from birkin_lite.artifacts import import_source
-from birkin_lite.context import extraction_cache_key
-from birkin_lite.contracts import Actor, AppError, PlanV1, RunRequest, canonical_json
-from birkin_lite.db import create_run, get_run, get_value, init_db, row_dict, set_value
-from birkin_lite.engine import execute_next, install_plan
-from birkin_lite.tools import ExtractArgs, registry
+from kelly import office
+from kelly import tools as tool_module
+from kelly.artifacts import import_source
+from kelly.context import extraction_cache_key
+from kelly.contracts import Actor, AppError, PlanV1, RunRequest, canonical_json
+from kelly.db import create_run, get_run, get_value, init_db, row_dict, set_value
+from kelly.engine import execute_next, install_plan
+from kelly.tools import ExtractArgs, registry
 
 OWNER = Actor(id="owner", project_ids=["sales"])
 

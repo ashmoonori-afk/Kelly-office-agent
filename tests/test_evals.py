@@ -242,9 +242,9 @@ def test_unexpected_deferral_and_old_unobserved_receipt_count_are_not_successes(
 
 
 def test_adapters_report_waiting_state_keep_detail_and_bind_zero_published_receipts(tmp_path):
-    from birkin_lite import db
-    from birkin_lite.contracts import RunRequest
     from evals import execute, live
+    from kelly import db
+    from kelly.contracts import RunRequest
 
     case = next(case for case in live.load_cases() if case.id == "conflict_missing-05")
     conn = db.init_db(tmp_path / "state.db")

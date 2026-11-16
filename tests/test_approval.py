@@ -1,9 +1,9 @@
 import pytest
 from test_engine import NOW, OWNER, setup_run
 
-from birkin_lite.contracts import ActionProposal, PlanV1, canonical_json, digest
-from birkin_lite.db import get_run, row_dict
-from birkin_lite.engine import execute_next, install_plan, resolve_approval
+from kelly.contracts import ActionProposal, PlanV1, canonical_json, digest
+from kelly.db import get_run, row_dict
+from kelly.engine import execute_next, install_plan, resolve_approval
 
 
 def pending(tmp_path):

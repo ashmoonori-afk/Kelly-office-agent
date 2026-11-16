@@ -6,14 +6,14 @@ import pytest
 from test_context import binding
 from test_verification import NOW, model_todo, report, source_context
 
-from birkin_lite import office, verification
-from birkin_lite.context import (
+from kelly import office, verification
+from kelly.context import (
     PROMPT_VERSION,
     build_model_request,
     build_plan_request,
     response_cache_key,
 )
-from birkin_lite.contracts import (
+from kelly.contracts import (
     Actor,
     AppError,
     DraftReply,
@@ -25,7 +25,7 @@ from birkin_lite.contracts import (
     digest,
     evidence_id,
 )
-from birkin_lite.tools import _content_from_input, catalog, registry
+from kelly.tools import _content_from_input, catalog, registry
 
 
 def numeric(**changes):

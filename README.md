@@ -74,6 +74,8 @@ Windows CI checks local file, database, browser, and daemon workflows, plus an i
 - [Local diagnostics, log export, backup, and restore](docs/OPERATIONS.md)
 - [30-day retention and pinned results](docs/RETENTION.md)
 
-The Python import namespace remains `birkin_lite`; the agent runs independently of the original Birkin package.
+The Python import namespace is `kelly`. The deprecated `birkin_lite` import and
+`blite` command remain available for one release. Existing `blite_session` cookies
+are accepted during this transition; new sessions use `kelly_session`.
 
 [MIT license](LICENSE) · [Third-party notices](docs/THIRD_PARTY.md)

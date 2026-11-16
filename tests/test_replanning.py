@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from birkin_lite import engine
-from birkin_lite.contracts import (
+from kelly import engine
+from kelly.contracts import (
     Actor,
     AppError,
     PlanV1,
@@ -14,8 +14,8 @@ from birkin_lite.contracts import (
     ToolExecutor,
     canonical_json,
 )
-from birkin_lite.db import create_run, get_run, get_value, init_db
-from birkin_lite.engine import install_plan, step_key
+from kelly.db import create_run, get_run, get_value, init_db
+from kelly.engine import install_plan, step_key
 
 OWNER = Actor(id="owner", project_ids=["sales"])
 

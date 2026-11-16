@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from birkin_lite.contracts import (
+from kelly.contracts import (
     AppError,
     ModelBinding,
     ModelExecutor,
@@ -16,7 +16,7 @@ from birkin_lite.contracts import (
     TodoV1,
     ToolExecutor,
 )
-from birkin_lite.routing import choose_model, expand_recipe, normalize_todo
+from kelly.routing import choose_model, expand_recipe, normalize_todo
 
 
 def todo(**changes):

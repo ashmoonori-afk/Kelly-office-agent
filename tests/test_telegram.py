@@ -6,9 +6,9 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from birkin_lite import db
-from birkin_lite.contracts import Actor, AppError
-from birkin_lite.telegram import (
+from kelly import db
+from kelly.contracts import Actor, AppError
+from kelly.telegram import (
     MAX_RESPONSE_BYTES,
     TelegramClient,
     TelegramError,
@@ -332,8 +332,8 @@ def test_token_epoch_preserves_old_receipt_and_accepts_low_new_update_ids(tmp_pa
         paired as recovery_paired,
     )
 
-    from birkin_lite.artifacts import open_artifact
-    from birkin_lite.telegram import create_callback
+    from kelly.artifacts import open_artifact
+    from kelly.telegram import create_callback
 
     conn = recovery_paired(tmp_path)
     no_requests = httpx.MockTransport(

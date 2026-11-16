@@ -8,10 +8,10 @@ import pytest
 from test_automation import ANCHOR, OWNER, config, enabled, event
 from test_prepare_run import POLICY, binding, planned, result
 
-from birkin_lite import db
-from birkin_lite.contracts import AppError, PrivacyPolicy, canonical_json
-from birkin_lite.planning import prepare_run
-from birkin_lite.tools import registry
+from kelly import db
+from kelly.contracts import AppError, PrivacyPolicy, canonical_json
+from kelly.planning import prepare_run
+from kelly.tools import registry
 
 
 @pytest.fixture

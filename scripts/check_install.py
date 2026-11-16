@@ -150,13 +150,13 @@ from contextlib import closing
 from pathlib import Path
 from importlib.metadata import distribution, metadata
 from importlib.resources import files
-from birkin_lite import artifacts, db
-from birkin_lite.config import AppConfig, create_config
+from kelly import artifacts, db
+from kelly.config import AppConfig, create_config
 
 assert metadata('kelly-office-agent')['License-Expression'] == 'MIT'
 assert 'Kelly' in metadata('kelly-office-agent').get_payload()
 assert {'kelly', 'blite'} <= {p.name for p in distribution('kelly-office-agent').entry_points}
-resources = files('birkin_lite')
+resources = files('kelly')
 assert resources.joinpath('schema.sql').is_file()
 assert all(resources.joinpath('licenses', name).is_file() for name in ('sbom.json', 'third-party.txt'))
 assert all(resources.joinpath('static', name).is_file() for name in ('index.html', 'app.js', 'app.css', 'kelly-companion.png', 'favicon.svg'))
@@ -178,7 +178,7 @@ print(json.dumps({key: source[key] for key in ('id', 'relative_path', 'sha256')}
 import sys
 from pathlib import Path
 from pydantic import SecretStr
-from birkin_lite import config
+from kelly import config
 home = Path(sys.argv[1])
 config.store_secret(home, 'xai', SecretStr(sys.argv[2]))
 assert (config.stored_secret(home, 'xai') is not None) == bool(sys.argv[2])
@@ -205,7 +205,7 @@ assert (config.stored_secret(home, 'xai') is not None) == bool(sys.argv[2])
     recovery_check = """
 import sys
 from pathlib import Path
-from birkin_lite import artifacts, config, db, operations
+from kelly import artifacts, config, db, operations
 for folder in sys.argv[1:]:
     home = Path(folder)
     with operations._database(home) as conn:
@@ -234,7 +234,7 @@ assert not (Path(sys.argv[3]) / 'auth').exists()
         [
             str(python),
             "-c",
-            "import importlib.util; assert importlib.util.find_spec('birkin_lite') is None",
+            "import importlib.util; assert importlib.util.find_spec('kelly') is None",
         ],
         cwd=work,
     )

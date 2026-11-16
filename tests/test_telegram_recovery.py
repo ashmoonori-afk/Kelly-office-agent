@@ -8,9 +8,9 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from birkin_lite import db
-from birkin_lite.contracts import ActionProposal, Actor, RunRequest, canonical_json, digest
-from birkin_lite.telegram import (
+from kelly import db
+from kelly.contracts import ActionProposal, Actor, RunRequest, canonical_json, digest
+from kelly.telegram import (
     TelegramClient,
     create_callback,
     create_pairing,
@@ -188,7 +188,7 @@ def test_inbox_run_and_cursor_rollback_together_then_reopen_deduplicates(tmp_pat
     "broken", ["oversized", "callback_message", "callback_chat", "callback_sender"]
 )
 def test_invalid_payload_with_valid_id_is_rejected_without_blocking_next_update(tmp_path, broken):
-    from birkin_lite.telegram import MAX_UPDATE_BYTES
+    from kelly.telegram import MAX_UPDATE_BYTES
 
     conn = paired(tmp_path)
     update = callback(2, "approve:" + "a" * 24)
@@ -250,7 +250,7 @@ def test_opaque_callback_approval_and_nonce_rollback_with_cursor(tmp_path):
 
 
 def test_expired_callback_and_foreign_actor_never_approve(tmp_path):
-    from birkin_lite.contracts import AppError
+    from kelly.contracts import AppError
 
     conn = paired(tmp_path)
     _, approval_id = pending_approval(conn)
@@ -305,7 +305,7 @@ def test_callback_rechecks_bound_decision_and_current_proposal(tmp_path, change)
 
 
 def completed_document(conn, home):
-    from birkin_lite.artifacts import create_draft, publish_draft
+    from kelly.artifacts import create_draft, publish_draft
 
     received = ingest_update(
         conn, OWNER, CONNECTION, message(2, "결과 파일 작성 후 나에게 전달"), now=NOW
@@ -327,9 +327,9 @@ def completed_document(conn, home):
 
 @pytest.mark.parametrize("failure", ["timeout", "sent_persistence_crash"])
 def test_uncertain_document_delivery_never_resends_or_regenerates(tmp_path, failure):
-    from birkin_lite.artifacts import open_artifact
-    from birkin_lite.engine import execute_next, resume_after_restart
-    from birkin_lite.tools import registry
+    from kelly.artifacts import open_artifact
+    from kelly.engine import execute_next, resume_after_restart
+    from kelly.tools import registry
 
     conn = paired(tmp_path)
     run_id, artifact_id, content = completed_document(conn, tmp_path)
@@ -443,8 +443,8 @@ def test_malformed_retry_metadata_is_unknown_and_never_retried(tmp_path, paramet
 
 
 def test_preflight_pass_draft_and_unreferenced_result_cannot_be_delivered(tmp_path):
-    from birkin_lite.artifacts import create_draft, publish_draft
-    from birkin_lite.contracts import AppError
+    from kelly.artifacts import create_draft, publish_draft
+    from kelly.contracts import AppError
 
     conn = paired(tmp_path)
     received = ingest_update(conn, OWNER, CONNECTION, message(2, "결과 파일 준비"), now=NOW)

@@ -201,7 +201,7 @@ python -m evals.live annotate --case summary-01 --ledger .birkin-lite/live-evalu
 
 ## 2026-09-08 오류 명칭 정정: corpus/protocol v1.1
 
-`automation-12.scenario.expected.error`를 `PATH_DENIED`에서 `POLICY_DENIED`로 정정했다. 근거는 제품의 [오류 계약](../src/birkin_lite/contracts.py)에 정의된 오류 명칭이다. `PATH_DENIED`는 해당 오류 계약에 없다. 권한 차단 요구, 허용 범위 밖 자료 읽기 0회, 업무 생성 0회는 그대로이며 제품 동작이나 다른 정답 기준은 바꾸지 않았다. 관측 결과에 맞춰 품질 기준을 완화한 변경이 아닌 오류 분류와의 정합성 정정이다.
+`automation-12.scenario.expected.error`를 `PATH_DENIED`에서 `POLICY_DENIED`로 정정했다. 근거는 제품의 [오류 계약](../src/kelly/contracts.py)에 정의된 오류 명칭이다. `PATH_DENIED`는 해당 오류 계약에 없다. 권한 차단 요구, 허용 범위 밖 자료 읽기 0회, 업무 생성 0회는 그대로이며 제품 동작이나 다른 정답 기준은 바꾸지 않았다. 관측 결과에 맞춰 품질 기준을 완화한 변경이 아닌 오류 분류와의 정합성 정정이다.
 
 corpus와 protocol 버전은 `birkin-eval-v1.1`이다. 기존 `p12-automation-v2`의 19/20 일치 관측은 원본 그대로 보존한다. 새 버전은 condition fingerprint가 달라지므로 기존 v1 관측을 재사용하거나 새 실행으로 재분류하지 않는다. 새 버전 평가는 별도 작업 폴더에서 다시 실행한다.
 

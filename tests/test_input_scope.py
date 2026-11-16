@@ -2,10 +2,10 @@ import io
 
 import pytest
 
-from birkin_lite import office, tools
-from birkin_lite.artifacts import import_source
-from birkin_lite.contracts import Actor, AppError, RunRequest, TaskSpec
-from birkin_lite.db import (
+from kelly import office, tools
+from kelly.artifacts import import_source
+from kelly.contracts import Actor, AppError, RunRequest, TaskSpec
+from kelly.db import (
     allowed_sources,
     create_run,
     get_run,

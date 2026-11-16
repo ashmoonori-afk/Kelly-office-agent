@@ -5,9 +5,9 @@ from decimal import Decimal
 
 import pytest
 
-from birkin_lite import office
-from birkin_lite.artifacts import import_source
-from birkin_lite.contracts import (
+from kelly import office
+from kelly.artifacts import import_source
+from kelly.contracts import (
     Actor,
     AppError,
     Evidence,
@@ -21,10 +21,10 @@ from birkin_lite.contracts import (
     digest,
     evidence_id,
 )
-from birkin_lite.db import create_run, init_db
-from birkin_lite.engine import install_plan
-from birkin_lite.tools import registry as tool_registry
-from birkin_lite.verification import model_grounding, required_verifiers
+from kelly.db import create_run, init_db
+from kelly.engine import install_plan
+from kelly.tools import registry as tool_registry
+from kelly.verification import model_grounding, required_verifiers
 
 OWNER = Actor(id="owner", project_ids=["office"])
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
@@ -315,7 +315,7 @@ def test_high_review_rechecks_real_txt_and_all_claim_references(tmp_path):
 
 def test_field_and_numeric_contracts_without_process_boundary(monkeypatch):
     """Pure contract evidence; the separate file tests prove the actual parser boundary."""
-    from birkin_lite import verification
+    from kelly import verification
 
     evidence = Evidence(
         artifact_id="source",
@@ -373,7 +373,7 @@ def test_field_and_numeric_contracts_without_process_boundary(monkeypatch):
 
 def test_natural_assignment_needs_separate_exactly_bound_semantic_review(monkeypatch):
     """The file reopen is mocked here; hash/locator enforcement has separate actual-file tests."""
-    from birkin_lite import verification
+    from kelly import verification
 
     evidence = Evidence(
         artifact_id="source",

@@ -12,8 +12,8 @@ from typing import Literal
 
 from pydantic import Field
 
-from birkin_lite import artifacts, config, context, db, engine, tools, usage, verification
-from birkin_lite.contracts import (
+from kelly import artifacts, config, context, db, engine, tools, usage, verification
+from kelly.contracts import (
     MODEL_OUTPUT_TYPES,
     Actor,
     AppError,
@@ -35,8 +35,8 @@ from birkin_lite.contracts import (
     canonical_json,
     digest,
 )
-from birkin_lite.providers import TransportError, XAIClient, metered_complete
-from birkin_lite.safe_io import (
+from kelly.providers import TransportError, XAIClient, metered_complete
+from kelly.safe_io import (
     ensure_directory,
     guard_directory,
     rename_new,
@@ -274,7 +274,7 @@ def _exam_todo(manifest, case):
 def _checks(task, result, exam_context, spec, registered):
     if task != "planning":
         return verification.model_grounding(result.parsed_output, exam_context)
-    from birkin_lite.planning import _validate_requirements
+    from kelly.planning import _validate_requirements
 
     parsed = PlanningResultV1.model_validate(result.parsed_output)
     try:
@@ -544,7 +544,7 @@ def _bundle(workspace):
     ):
         raise AppError("POLICY_DENIED")
     records = []
-    from birkin_lite.operations import _database
+    from kelly.operations import _database
 
     with _database(root) as conn:
         if db.get_value(conn, "qualification_execution") != {

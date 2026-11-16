@@ -11,10 +11,10 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
-from birkin_lite import db
-from birkin_lite.api import create_app
-from birkin_lite.config import AppConfig, create_config
-from birkin_lite.contracts import TaskSpec
+from kelly import db
+from kelly.api import create_app
+from kelly.config import AppConfig, create_config
+from kelly.contracts import TaskSpec
 
 ORIGIN = "http://127.0.0.1:8765"
 CSV = "부서,금액\n영업,1\n지원,2\n".encode()

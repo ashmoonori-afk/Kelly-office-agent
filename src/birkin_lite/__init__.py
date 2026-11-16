@@ -1,3 +1,11 @@
-"""Kelly Office Agent: one local executor for office TODOs."""
+"""Compatibility import for one release; new callers should import kelly."""
 
-__version__ = "0.1.0"
+import warnings
+
+from kelly import __version__ as __version__
+
+warnings.warn(
+    "birkin_lite is deprecated; import kelly instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)

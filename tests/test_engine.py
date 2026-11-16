@@ -2,9 +2,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from birkin_lite.contracts import Actor, AppError, PlanV1, Requirement, RunRequest
-from birkin_lite.db import create_run, get_run, init_db, row_dict
-from birkin_lite.engine import (
+from kelly.contracts import Actor, AppError, PlanV1, Requirement, RunRequest
+from kelly.db import create_run, get_run, init_db, row_dict
+from kelly.engine import (
     DaemonLock,
     Tool,
     execute_next,

@@ -4,7 +4,7 @@ from functools import partial
 import pytest
 from test_prepare_run import OWNER, POLICY, binding, planned, setup
 
-from birkin_lite.contracts import (
+from kelly.contracts import (
     AppError,
     ModelResult,
     PlanV1,
@@ -16,10 +16,10 @@ from birkin_lite.contracts import (
     digest,
     evidence_id,
 )
-from birkin_lite.db import create_run, get_value, row_dict
-from birkin_lite.engine import complete_model_todo, execute_next, install_plan
-from birkin_lite.planning import prepare_run
-from birkin_lite.providers import metered_complete
+from kelly.db import create_run, get_value, row_dict
+from kelly.engine import complete_model_todo, execute_next, install_plan
+from kelly.planning import prepare_run
+from kelly.providers import metered_complete
 
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
 

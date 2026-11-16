@@ -6,15 +6,15 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from birkin_lite import db, usage
-from birkin_lite.api import create_app
-from birkin_lite.automation import (
+from kelly import db, usage
+from kelly.api import create_app
+from kelly.automation import (
     AutomationConfig,
     record_daemon_observation,
     tick_automations,
 )
-from birkin_lite.config import AppConfig, create_config, load_config, stored_secret
-from birkin_lite.contracts import (
+from kelly.config import AppConfig, create_config, load_config, stored_secret
+from kelly.contracts import (
     SAFE_MESSAGES,
     ActionProposal,
     Actor,

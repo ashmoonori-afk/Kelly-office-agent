@@ -6,11 +6,11 @@ from datetime import datetime
 
 import pytest
 
-from birkin_lite.artifacts import import_source, open_artifact
-from birkin_lite.context import cache_get, cache_put, extraction_cache_key
-from birkin_lite.contracts import Actor, AppError, RunRequest, canonical_json
-from birkin_lite.db import create_run, init_db
-from birkin_lite.memory import (
+from kelly.artifacts import import_source, open_artifact
+from kelly.context import cache_get, cache_put, extraction_cache_key
+from kelly.contracts import Actor, AppError, RunRequest, canonical_json
+from kelly.db import create_run, init_db
+from kelly.memory import (
     MemoryRecord,
     _protected,
     _purge,
@@ -25,7 +25,7 @@ from birkin_lite.memory import (
     save_memory,
     search_memory,
 )
-from birkin_lite.office import locate
+from kelly.office import locate
 
 OWNER = Actor(id="owner", project_ids=["sales", "private"])
 NOW = "2026-09-08T00:00:00Z"
@@ -278,7 +278,7 @@ def test_purge_filesystem_failure_keeps_tombstone(tmp_path, monkeypatch):
     def fail(*args, **kwargs):
         raise OSError("simulated file permission failure")
 
-    monkeypatch.setattr("birkin_lite.memory.open_regular", fail)
+    monkeypatch.setattr("kelly.memory.open_regular", fail)
     with pytest.raises(OSError):
         delete_memory(
             home,
@@ -296,7 +296,7 @@ def test_purge_filesystem_failure_keeps_tombstone(tmp_path, monkeypatch):
 
 
 def test_requested_purge_survives_restart_and_waits_for_reference(tmp_path):
-    from birkin_lite.db import get_value
+    from kelly.db import get_value
 
     conn = init_db(tmp_path / "state.db")
     home = tmp_path / "files"
@@ -477,8 +477,8 @@ def test_memory_locator_reads_managed_json_without_parser_and_rechecks_scope(tmp
     def no_parser(*args, **kwargs):
         raise AssertionError("Memory locators must not invoke a document parser")
 
-    monkeypatch.setattr("birkin_lite.artifacts.parse_file", no_parser)
-    monkeypatch.setattr("birkin_lite.office.parse_file", no_parser)
+    monkeypatch.setattr("kelly.artifacts.parse_file", no_parser)
+    monkeypatch.setattr("kelly.office.parse_file", no_parser)
     conn = init_db(tmp_path / "state.db")
     view = _memory_view()
     _install_snapshot(tmp_path, conn, view)
@@ -557,10 +557,10 @@ def test_memory_locator_rejects_expiry_actual_tampering_and_tombstones(tmp_path)
 
 
 def test_project_search_includes_saved_memory_but_selected_sources_do_not(tmp_path):
-    from birkin_lite.contracts import RunRequest
-    from birkin_lite.db import create_run
-    from birkin_lite.tools import search
-    from birkin_lite.verification import source_grounding
+    from kelly.contracts import RunRequest
+    from kelly.db import create_run
+    from kelly.tools import search
+    from kelly.verification import source_grounding
 
     conn = init_db(tmp_path / "state.db")
     view = _memory_view()
@@ -579,9 +579,9 @@ def test_project_search_includes_saved_memory_but_selected_sources_do_not(tmp_pa
 
 
 def test_model_memory_save_arguments_cannot_manufacture_user_confirmation(tmp_path):
-    from birkin_lite.contracts import RunRequest, TodoV1
-    from birkin_lite.db import create_run
-    from birkin_lite.tools import registry
+    from kelly.contracts import RunRequest, TodoV1
+    from kelly.db import create_run
+    from kelly.tools import registry
 
     conn = init_db(tmp_path / "state.db")
     run = create_run(

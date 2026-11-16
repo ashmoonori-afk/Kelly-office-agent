@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from birkin_lite import db
-from birkin_lite.automation import (
+from kelly import db
+from kelly.automation import (
     AutomationConfig,
     detect_events,
     latest_occurrence,
@@ -15,7 +15,7 @@ from birkin_lite.automation import (
     record_daemon_observation,
     tick_automations,
 )
-from birkin_lite.contracts import Actor, AppError, RunRequest
+from kelly.contracts import Actor, AppError, RunRequest
 
 OWNER = Actor(id="owner", project_ids=["sales"])
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
@@ -222,7 +222,7 @@ def test_long_instruction_is_preserved_and_enqueue_failure_is_atomic(tmp_path):
 def test_model_automation_proposal_is_review_only_and_cannot_self_activate(tmp_path):
     from pydantic import ValidationError
 
-    from birkin_lite.tools import registry
+    from kelly.tools import registry
 
     conn = db.init_db(tmp_path / "state.db")
     run = db.create_run(
@@ -504,8 +504,8 @@ def test_observed_source_instructions_cannot_grant_authority(tmp_path):
 
 
 def test_real_folder_watch_stabilizes_snapshots_and_survives_reopen(tmp_path, monkeypatch):
-    from birkin_lite.artifacts import open_artifact
-    from birkin_lite.config import register_folder
+    from kelly.artifacts import open_artifact
+    from kelly.config import register_folder
 
     home, watched = tmp_path / "data", tmp_path / "incoming"
     watched.mkdir()
@@ -524,7 +524,7 @@ def test_real_folder_watch_stabilizes_snapshots_and_survives_reopen(tmp_path, mo
     state_key = "automation_state:" + row["id"]
     with monkeypatch.context() as patch:
         patch.setattr(
-            "birkin_lite.safe_io.open_regular",
+            "kelly.safe_io.open_regular",
             lambda *_: pytest.fail("Unstable poll opened content"),
         )
         assert tick_automations(conn, home, OWNER, NOW) == []
@@ -576,7 +576,7 @@ def test_real_folder_watch_stabilizes_snapshots_and_survives_reopen(tmp_path, mo
 
 
 def test_folder_grants_deny_managed_storage_and_other_project_reuse(tmp_path):
-    from birkin_lite.config import get_registered_folder, register_folder
+    from kelly.config import get_registered_folder, register_folder
 
     home, watched = tmp_path / "data", tmp_path / "incoming"
     watched.mkdir()
@@ -609,7 +609,7 @@ def test_folder_grants_deny_managed_storage_and_other_project_reuse(tmp_path):
 
 @pytest.mark.parametrize("kind", ["once", "file_changed"])
 def test_tick_enqueue_failure_does_not_advance_completion_or_baseline(tmp_path, kind):
-    from birkin_lite.config import register_folder
+    from kelly.config import register_folder
 
     home = tmp_path / "data"
     conn = db.init_db(home / "state.db")
@@ -683,12 +683,12 @@ def test_real_system_clock_once_runs_aggregate_without_model_calls(tmp_path):
     """Real wall-clock scheduler tick through actual CSV parsing and XLSX execution."""
     from openpyxl import load_workbook
 
-    from birkin_lite.artifacts import import_source, open_artifact
-    from birkin_lite.contracts import PrivacyPolicy
-    from birkin_lite.engine import execute_next
-    from birkin_lite.planning import prepare_run
-    from birkin_lite.tools import registry
-    from birkin_lite.usage import summarize_usage
+    from kelly.artifacts import import_source, open_artifact
+    from kelly.contracts import PrivacyPolicy
+    from kelly.engine import execute_next
+    from kelly.planning import prepare_run
+    from kelly.tools import registry
+    from kelly.usage import summarize_usage
 
     home = tmp_path / "data"
     conn = db.init_db(home / "state.db")

@@ -2,7 +2,7 @@
 
 `kelly-workspace.png` and `kelly-mobile.png` are actual Chromium screenshots of the local application with synthetic data, captured on 2026-09-08. They are not generated mockups. The completed XLSX example was downloaded and reopened during the browser test; its total was 35,000 with zero model calls. The 360px screenshot demonstrates reflow, not access from a remote phone.
 
-The app companion is saved at `src/birkin_lite/static/kelly-companion.png`. It was edited with the built-in image generation tool from the hero: isolate the same folded-paper character and a tidy document stack, remove all text and scenery, keep a square composition and soft shadows. The final edit replaced the background with solid warm ivory (`#F5F2EA`). It is an illustration, not a screenshot. The unused checkerboard draft was not included in the project.
+The app companion is saved at `src/kelly/static/kelly-companion.png`. It was edited with the built-in image generation tool from the hero: isolate the same folded-paper character and a tidy document stack, remove all text and scenery, keep a square composition and soft shadows. The final edit replaced the background with solid warm ivory (`#F5F2EA`). It is an illustration, not a screenshot. The unused checkerboard draft was not included in the project.
 
 `kelly-hero.png` was generated with the built-in image generation tool for this project. It is an original brand illustration, not a product screenshot.
 

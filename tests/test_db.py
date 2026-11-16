@@ -3,8 +3,8 @@ import sqlite3
 
 import pytest
 
-from birkin_lite.contracts import Actor, AppError, RunRequest
-from birkin_lite.db import apply_revision, create_run, get_run, init_db, transaction
+from kelly.contracts import Actor, AppError, RunRequest
+from kelly.db import apply_revision, create_run, get_run, init_db, transaction
 
 
 def test_durable_idempotency_and_access(tmp_path):
