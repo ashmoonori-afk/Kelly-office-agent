@@ -14,7 +14,7 @@ from .contracts import AppError, PlanningResultV1, RunRequest, canonical_json
 from .db import create_run, init_db, row_dict
 from .operations import _database
 from .providers import TransportError, XAIClient, metered_complete
-from .safe_io import ensure_directory, guard_directory, rename_new
+from .safe_io import ensure_directory, guard_directory, open_new, rename_new, unlink_file
 
 
 def run_probe(config_path, model_id, *, allow_live=False, http_transport=None):
@@ -128,14 +128,14 @@ def run_probe(config_path, model_id, *, allow_live=False, http_transport=None):
         temp = evidence / (uuid.uuid4().hex + ".part")
         with guard_directory(evidence):
             try:
-                with temp.open("xb") as stream:
+                with open_new(temp) as stream:
                     stream.write(data)
                     stream.flush()
                     os.fsync(stream.fileno())
                 rename_new(temp, path, expected_sha256=hashlib.sha256(data).hexdigest())
             finally:
                 if temp.exists():
-                    temp.unlink()
+                    unlink_file(temp)
         return {"report": str(path), "live": live, "accepted": accepted, "error_code": error}
 
 

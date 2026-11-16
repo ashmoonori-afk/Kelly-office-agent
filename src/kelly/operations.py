@@ -15,7 +15,7 @@ from . import config, db, engine
 from ._vendor.office import path_identity, windows_native
 from ._vendor.office.errors import DocumentError
 from .contracts import SAFE_MESSAGES, AppError, canonical_json
-from .safe_io import guard_directory, open_regular, validate_root
+from .safe_io import guard_directory, open_new, open_regular, validate_root
 
 MAX_FILES = 10000
 MAX_FILE_BYTES = 256 * 1024 * 1024
@@ -49,7 +49,7 @@ def _read(path, root, maximum=MAX_FILE_BYTES):
 
 
 def _write(path, content):
-    with guard_directory(path.parent), path.open("xb") as stream:
+    with guard_directory(path.parent), open_new(path) as stream:
         stream.write(content)
         stream.flush()
         os.fsync(stream.fileno())

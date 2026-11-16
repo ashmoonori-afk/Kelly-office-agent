@@ -12,6 +12,7 @@ from pydantic import SecretStr
 from . import config
 from .contracts import AppError
 from .engine import DaemonLock
+from .platform.paths import default_home
 
 
 def main(argv=None):
@@ -61,7 +62,7 @@ def main(argv=None):
             return 0 if result.get("ok", True) and result.get("state") != "unknown" else 1
         path = args.config.absolute()
         if not path.exists() and not args.access_code:
-            config.create_config(path, config.AppConfig(home=".birkin-lite"))
+            config.create_config(path, config.AppConfig(home=str(default_home())))
         settings = config.load_config(path)
         home = config.home_path(settings, path)
         if args.access_code:

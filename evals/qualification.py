@@ -39,7 +39,9 @@ from kelly.providers import TransportError, XAIClient, metered_complete
 from kelly.safe_io import (
     ensure_directory,
     guard_directory,
+    open_new,
     rename_new,
+    unlink_file,
     validate_root,
 )
 
@@ -103,13 +105,13 @@ def _write(root, name, value):
     target, temporary = root / name, root / (uuid.uuid4().hex + ".part")
     with guard_directory(root):
         try:
-            with temporary.open("xb") as stream:
+            with open_new(temporary) as stream:
                 stream.write(data)
                 stream.flush()
                 os.fsync(stream.fileno())
             rename_new(temporary, target, expected_sha256=sha)
         finally:
-            temporary.unlink(missing_ok=True)
+            unlink_file(temporary, missing_ok=True)
     return sha
 
 
