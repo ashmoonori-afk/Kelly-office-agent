@@ -11,7 +11,15 @@ from pathlib import Path, PurePosixPath
 
 from .contracts import Actor, AppError, canonical_json, digest
 from .db import get_run, require_project, row_dict, utc_now
-from .safe_io import ensure_directory, guard_directory, open_regular, rename_new, validate_root
+from .safe_io import (
+    ensure_directory,
+    guard_directory,
+    open_new,
+    open_regular,
+    rename_new,
+    unlink_file,
+    validate_root,
+)
 from .sandbox import parse_file
 
 MAX_BYTES = 25 * 1024 * 1024
@@ -139,7 +147,7 @@ def _store(
     size = 0
     with guard_directory(directory):
         try:
-            with temporary.open("xb") as output:
+            with open_new(temporary) as output:
                 while chunk := stream.read(65536):
                     if not isinstance(chunk, bytes):
                         raise AppError("INVALID_INPUT")
@@ -214,7 +222,7 @@ def _store(
         finally:
             # Only our unpredictable private temporary name is removed; original files are retained.
             if temporary.exists():
-                temporary.unlink()
+                unlink_file(temporary)
 
 
 def import_source(home, conn, stream, upload, actor, project_id):

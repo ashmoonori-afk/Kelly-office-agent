@@ -1,4 +1,4 @@
-name: Windows checks
+name: CI
 
 on:
   push:
@@ -10,11 +10,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  windows:
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
@@ -47,6 +47,44 @@ jobs:
           include-hidden-files: true
           path: |
             .birkin-lite/evidence/windows-tests.xml
+            .birkin-lite/evidence/p11-ui-*.png
+            .birkin-lite/evidence/kelly-ui-*.png
+            .birkin-lite/install-check-*/result.json
+          retention-days: 7
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.10'
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Install Chromium
+        run: uv run --locked python -m playwright install chromium
+      - name: Lint
+        run: uv run --locked python -m ruff check src tests scripts evals
+      - name: Tests, real local UI and file workflows
+        run: uv run --locked python -m pytest -q --junitxml=.birkin-lite/evidence/macos-tests.xml
+      - name: Build wheel into the local cache
+        run: uv build --wheel
+      - name: Isolated install, restart, backup, restore and uninstall
+        run: uv run --locked python scripts/check_install.py
+      - name: Keep synthetic check evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-checks
+          include-hidden-files: true
+          path: |
+            .birkin-lite/evidence/macos-tests.xml
             .birkin-lite/evidence/p11-ui-*.png
             .birkin-lite/evidence/kelly-ui-*.png
             .birkin-lite/install-check-*/result.json

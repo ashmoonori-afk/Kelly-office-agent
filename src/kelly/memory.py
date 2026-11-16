@@ -24,7 +24,7 @@ from .contracts import (
 )
 from .db import require_project, row_dict, set_value, transaction, utc_now
 from .office import locate
-from .safe_io import guard_directory, open_regular
+from .safe_io import guard_directory, open_regular, unlink_file
 
 
 class MemorySaveArgs(StrictModel):
@@ -418,7 +418,7 @@ def _purge(home, rows, purge_original, protected, *, conn=None):
                     with open_regular(path, Path(home).absolute()):
                         pass
                     # Parent handles stay held; unlink removes only this managed directory entry.
-                    path.unlink()
+                    unlink_file(path)
             removed.append(row["id"])
         if conn is not None:
             with transaction(conn):

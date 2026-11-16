@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 from . import artifacts, db
 from .contracts import AppError, canonical_json
 from .memory import _references, retry_requested_purges
-from .safe_io import guard_directory, open_regular
+from .safe_io import guard_directory, open_regular, unlink_file
 
 FINAL = {"succeeded", "failed", "cancelled", "rejected", "expired"}
 
@@ -197,7 +197,7 @@ def _purge(conn, home, actor):
                             hashed.update(chunk)
                         if size != row["byte_size"] or hashed.hexdigest() != row["sha256"]:
                             raise AppError("SOURCE_CHANGED")
-                    path.unlink()
+                    unlink_file(path)
             with db.transaction(conn):
                 conn.execute(
                     "UPDATE artifacts SET provenance_json=? WHERE id=?",
