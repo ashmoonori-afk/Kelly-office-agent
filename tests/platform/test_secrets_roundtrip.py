@@ -14,7 +14,9 @@ from kelly.platform import secrets
 pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="Native macOS Keychain")
 
 
-@pytest.mark.parametrize("plain", [b"", b"synthetic-secret", b"\x00\xff" * 32768])
+@pytest.mark.parametrize(
+    "plain", [b"", b"synthetic-secret", b"\x00\xff" * 32768], ids=["empty", "text", "max-binary"]
+)
 def test_native_binary_roundtrip_and_deletion(plain: bytes) -> None:
     reference = secrets.protect(plain)
     try:
