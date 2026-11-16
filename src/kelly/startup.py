@@ -42,7 +42,7 @@ def _task_spec(config_path):
         "name": "KellyOfficeAgent-" + identity,
         "description": "Kelly Office Agent current-user startup " + identity,
         "execute": str(executable),
-        "arguments": subprocess.list2cmdline(["-m", "birkin_lite.startup", "--run", str(path)]),
+        "arguments": subprocess.list2cmdline(["-m", "kelly.startup", "--run", str(path)]),
         "working_directory": str(path.parent),
     }
 

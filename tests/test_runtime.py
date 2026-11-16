@@ -10,9 +10,9 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from birkin_lite import config, db, engine, telegram, tools
-from birkin_lite.contracts import AppError, PlanV1, RunRequest, TaskSpec, canonical_json
-from birkin_lite.runtime import Runtime
+from kelly import config, db, engine, telegram, tools
+from kelly.contracts import AppError, PlanV1, RunRequest, TaskSpec, canonical_json
+from kelly.runtime import Runtime
 
 TEXT = "동료에게 짧은 인사말 작성"
 CANDIDATE = {
@@ -43,7 +43,7 @@ def make_runtime(tmp_path, **kwargs):
 
 def test_daemon_start_tick_shutdown_and_restart_observations_are_durable(tmp_path, monkeypatch):
     now = datetime(2026, 9, 8, tzinfo=UTC)
-    monkeypatch.setattr("birkin_lite.runtime._clock", lambda: now)
+    monkeypatch.setattr("kelly.runtime._clock", lambda: now)
     runtime = make_runtime(tmp_path)
 
     async def scenario():
@@ -432,7 +432,7 @@ def test_restart_recovers_real_running_tool_then_executes_once(tmp_path):
     plan = PlanV1.model_validate(planned()["plan"])
     todo = plan.todos[0]
     todo.kind, todo.signals = "mechanical", ["fixed_transform"]
-    from birkin_lite.contracts import ToolExecutor
+    from kelly.contracts import ToolExecutor
 
     todo.executor = ToolExecutor(tool_name="memory.search", args={"query": "인사말"})
     todo.output_schema = "MemoryListV1"
@@ -625,7 +625,7 @@ def test_later_failure_preserves_actual_completed_tool_output(tmp_path):
     plan = PlanV1.model_validate(planned()["plan"])
     first = plan.todos[0].model_copy(deep=True)
     first.id, first.kind, first.signals = "remember", "mechanical", ["fixed_transform"]
-    from birkin_lite.contracts import ToolExecutor
+    from kelly.contracts import ToolExecutor
 
     first.executor = ToolExecutor(tool_name="memory.search", args={"query": "인사말"})
     first.output_schema = "MemoryListV1"
@@ -750,7 +750,7 @@ def test_automation_revocation_is_checked_before_each_execution_boundary(
         else:
             plan = PlanV1.model_validate(planned()["plan"])
             if stage == "tool":
-                from birkin_lite.contracts import ToolExecutor
+                from kelly.contracts import ToolExecutor
 
                 todo = plan.todos[0]
                 todo.kind, todo.signals = "mechanical", ["fixed_transform"]

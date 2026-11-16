@@ -18,8 +18,8 @@ dependencies = [
 ]
 
 [project.scripts]
-kelly = "birkin_lite.__main__:main"
-blite = "birkin_lite.__main__:main"
+kelly = "kelly.__main__:main"
+blite = "kelly.__main__:main"
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.12,<1", "playwright>=1.54,<2"]
@@ -33,4 +33,4 @@ target-version = "py312"
 line-length = 100
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/birkin_lite"]
+packages = ["src/kelly", "src/birkin_lite"]

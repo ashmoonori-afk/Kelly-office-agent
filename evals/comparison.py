@@ -6,9 +6,9 @@ from functools import partial
 from pathlib import Path
 from time import perf_counter
 
-from birkin_lite import artifacts, db, engine, planning, tools, usage, verification
-from birkin_lite.contracts import AppError, ModelBinding, ModelResult, RunRequest
-from birkin_lite.providers import TransportError, metered_complete
+from kelly import artifacts, db, engine, planning, tools, usage, verification
+from kelly.contracts import AppError, ModelBinding, ModelResult, RunRequest
+from kelly.providers import TransportError, metered_complete
 
 from .execute import (
     ACTOR,

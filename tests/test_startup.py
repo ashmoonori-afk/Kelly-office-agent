@@ -13,9 +13,9 @@ import pytest
 from fastapi.testclient import TestClient
 from test_cli import ROOT, _environment, _free_port
 
-from birkin_lite import config, engine, startup
-from birkin_lite.api import create_app
-from birkin_lite.contracts import AppError
+from kelly import config, engine, startup
+from kelly.api import create_app
+from kelly.contracts import AppError
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def test_registration_tool_commands_are_explicit_current_user_and_exact_scope(wo
         "-MultipleInstances IgnoreNew",
         "-ExecutionTimeLimit ([TimeSpan]::Zero)",
         "pythonw.exe",
-        "birkin_lite.startup",
+        "kelly.startup",
         "$task.Principal.UserId -ne $owner",
         "$task.Actions[0].Arguments -ne $arguments",
         "$task.Actions[0].Execute -ne $execute",
@@ -129,7 +129,7 @@ def test_actual_pythonw_hidden_server_authenticates_stop_and_flushes_logs(worksp
     port = config.load_config(path).port
     pythonw = Path(sys.executable).with_name("pythonw.exe")
     process = subprocess.Popen(
-        [str(pythonw), "-m", "birkin_lite.startup", "--run", str(path)],
+        [str(pythonw), "-m", "kelly.startup", "--run", str(path)],
         cwd=ROOT,
         env=_environment(),
         stdin=subprocess.DEVNULL,
@@ -158,7 +158,7 @@ def test_actual_pythonw_hidden_server_authenticates_stop_and_flushes_logs(worksp
             )
             assert rejected.status_code == 401 and process.poll() is None
         stopped = subprocess.run(
-            [sys.executable, "-m", "birkin_lite", "stop", "--config", str(path)],
+            [sys.executable, "-m", "kelly", "stop", "--config", str(path)],
             cwd=ROOT,
             env=_environment(),
             capture_output=True,

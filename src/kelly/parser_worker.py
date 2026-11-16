@@ -33,12 +33,12 @@ def _word_field_instructions(xml):
 
 
 def preflight(path, filename, args):
-    from birkin_lite._vendor.office.artifact_identity import verify_descriptor_identity
-    from birkin_lite._vendor.office.package_scan import preflight_package
-    from birkin_lite._vendor.office.package_types import PackageLimits
-    from birkin_lite._vendor.office.safe_xml import ElementTree
-    from birkin_lite.contracts import AppError
-    from birkin_lite.safe_io import open_regular
+    from kelly._vendor.office.artifact_identity import verify_descriptor_identity
+    from kelly._vendor.office.package_scan import preflight_package
+    from kelly._vendor.office.package_types import PackageLimits
+    from kelly._vendor.office.safe_xml import ElementTree
+    from kelly.contracts import AppError
+    from kelly.safe_io import open_regular
 
     fmt = Path(filename).suffix.lower().lstrip(".")
     if fmt not in SUPPORTED:
@@ -131,7 +131,7 @@ def preflight(path, filename, args):
         else:
             from pypdf import PdfReader
 
-            from birkin_lite._vendor.office.adapters.pdf_inventory import inventory
+            from kelly._vendor.office.adapters.pdf_inventory import inventory
 
             verify_descriptor_identity(source.fileno(), Path(filename))
             source.seek(0)
@@ -174,7 +174,7 @@ def main():
         path = Path(request["path"])
         operation = request["operation"]
         args = request["args"]
-        from birkin_lite.safe_io import open_regular
+        from kelly.safe_io import open_regular
 
         # Keep the exact source protected between preflight and the later Office operation.
         with open_regular(path, path.parent):
@@ -183,9 +183,9 @@ def main():
                 result = metadata
             else:
                 try:
-                    from birkin_lite.office import worker_operation
+                    from kelly.office import worker_operation
                 except ImportError:
-                    from birkin_lite.contracts import AppError
+                    from kelly.contracts import AppError
 
                     raise AppError("UNSUPPORTED_CAPABILITY") from None
                 result = worker_operation(operation, path, {**args, "format": metadata["format"]})
@@ -195,8 +195,8 @@ def main():
     except MemoryError:
         response = b'{"error":"LIMIT_EXCEEDED"}'
     except Exception as exc:  # noqa: BLE001 - parser process error boundary, no raw exceptions leave it
-        from birkin_lite._vendor.office.errors import DocumentError
-        from birkin_lite.contracts import AppError
+        from kelly._vendor.office.errors import DocumentError
+        from kelly.contracts import AppError
 
         if isinstance(exc, AppError):
             code = exc.code

@@ -5,9 +5,12 @@ from functools import partial
 
 import pytest
 
-from birkin_lite import db, engine, usage
-from birkin_lite.context import build_model_request
-from birkin_lite.contracts import (
+from evals.comparison import FixtureTransport, compare_fixture
+from evals.execute import ACTOR
+from evals.run import Case, load_cases
+from kelly import db, engine, usage
+from kelly.context import build_model_request
+from kelly.contracts import (
     AppError,
     ModelBinding,
     ModelResult,
@@ -16,12 +19,9 @@ from birkin_lite.contracts import (
     RunRequest,
     Usage,
 )
-from birkin_lite.providers import TransportError
-from birkin_lite.routing import choose_evaluation_model, choose_model
-from birkin_lite.tools import registry
-from evals.comparison import FixtureTransport, compare_fixture
-from evals.execute import ACTOR
-from evals.run import Case, load_cases
+from kelly.providers import TransportError
+from kelly.routing import choose_evaluation_model, choose_model
+from kelly.tools import registry
 
 POLICY = PrivacyPolicy(project_id="eval", allowed_providers=["fixture"], local_only=True)
 CONTENT = {

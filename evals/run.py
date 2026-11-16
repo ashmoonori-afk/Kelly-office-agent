@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from birkin_lite.contracts import StrictModel, Usage
+from kelly.contracts import StrictModel, Usage
 
 CATEGORIES = ("table", "extraction", "summary", "multi_document", "conflict_missing", "automation")
 KINDS = ("mechanical", "simple", "standard", "complex")
@@ -634,8 +634,8 @@ def score(cases, records, labels=()):
 
 def boundary_smoke():
     """Exercise the real routing/context/metering boundary with a non-network callable."""
-    from birkin_lite.context import build_model_request
-    from birkin_lite.contracts import (
+    from kelly.context import build_model_request
+    from kelly.contracts import (
         Actor,
         ModelBinding,
         ModelResult,
@@ -646,11 +646,11 @@ def boundary_smoke():
         TaskFacts,
         TodoV1,
     )
-    from birkin_lite.db import create_run, init_db
-    from birkin_lite.engine import install_plan
-    from birkin_lite.providers import TransportError, metered_complete
-    from birkin_lite.routing import choose_model, normalize_todo
-    from birkin_lite.usage import summarize_usage
+    from kelly.db import create_run, init_db
+    from kelly.engine import install_plan
+    from kelly.providers import TransportError, metered_complete
+    from kelly.routing import choose_model, normalize_todo
+    from kelly.usage import summarize_usage
 
     actor = Actor(id="eval-owner", project_ids=["eval"])
     todo = TodoV1(

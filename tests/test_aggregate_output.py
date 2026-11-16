@@ -6,7 +6,7 @@ from copy import deepcopy
 
 import pytest
 
-from birkin_lite.tools import _content_from_input
+from kelly.tools import _content_from_input
 
 FORMATS = ["text", "md", "csv", "xlsx", "docx"]
 
@@ -88,10 +88,10 @@ def test_unspecified_unit_is_not_invented(fmt):
 def test_declared_units_survive_actual_csv_and_xlsx_creation_and_reopening(tmp_path):
     from openpyxl import load_workbook
 
-    from birkin_lite.artifacts import open_artifact
-    from birkin_lite.contracts import Actor, RunRequest
-    from birkin_lite.db import create_run, init_db
-    from birkin_lite.office import create_document
+    from kelly.artifacts import open_artifact
+    from kelly.contracts import Actor, RunRequest
+    from kelly.db import create_run, init_db
+    from kelly.office import create_document
 
     actor = Actor(id="owner", project_ids=["sales"])
     home = tmp_path / "files"

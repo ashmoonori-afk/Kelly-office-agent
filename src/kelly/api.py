@@ -38,7 +38,7 @@ from .runtime import Runtime
 
 Revision = Annotated[int, Field(ge=1)]
 JSON_LIMIT = 65536
-COOKIE = "blite_session"
+COOKIE = "kelly_session"
 
 
 class Empty(StrictModel):
@@ -365,7 +365,7 @@ def create_app(
                 "/static/favicon.svg",
             }
             if not public:
-                cookie = request.cookies.get(COOKIE, "")
+                cookie = request.cookies.get(COOKIE) or request.cookies.get("blite_session", "")
                 session = sessions.get(hashlib.sha256(cookie.encode()).hexdigest())
                 if session is None or session["expires"] <= time.monotonic():
                     raise AppError("AUTH_REQUIRED", status=401)

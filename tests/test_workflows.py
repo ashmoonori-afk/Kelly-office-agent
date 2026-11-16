@@ -9,8 +9,8 @@ from functools import partial
 import pytest
 from docx import Document
 
-from birkin_lite.artifacts import import_source, metadata, open_artifact
-from birkin_lite.contracts import (
+from kelly.artifacts import import_source, metadata, open_artifact
+from kelly.contracts import (
     Actor,
     Evidence,
     ModelBinding,
@@ -22,12 +22,12 @@ from birkin_lite.contracts import (
     digest,
     evidence_id,
 )
-from birkin_lite.db import create_run, init_db, row_dict
-from birkin_lite.engine import complete_model_todo, execute_next
-from birkin_lite.planning import prepare_run
-from birkin_lite.tools import registry
-from birkin_lite.usage import summarize_usage
-from birkin_lite.verification import registry as verifier_registry
+from kelly.db import create_run, init_db, row_dict
+from kelly.engine import complete_model_todo, execute_next
+from kelly.planning import prepare_run
+from kelly.tools import registry
+from kelly.usage import summarize_usage
+from kelly.verification import registry as verifier_registry
 
 OWNER = Actor(id="owner", project_ids=["sales"])
 NOW = datetime(2026, 9, 8, tzinfo=UTC)

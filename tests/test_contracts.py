@@ -3,7 +3,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from birkin_lite.contracts import (
+from kelly.contracts import (
     ActionProposal,
     Actor,
     AppError,

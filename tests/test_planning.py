@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 import pytest
 from test_routing import POLICY, binding, todo
 
-from birkin_lite import artifacts, tools, verification
-from birkin_lite.contracts import (
+from kelly import artifacts, tools, verification
+from kelly.contracts import (
     Actor,
     AppError,
     ArtifactInput,
@@ -16,10 +16,10 @@ from birkin_lite.contracts import (
     TaskFacts,
     TaskSpec,
 )
-from birkin_lite.db import create_run, get_run, init_db
-from birkin_lite.engine import execute_next, install_plan
-from birkin_lite.planning import normalize_plan
-from birkin_lite.routing import expand_recipe, reclassify_pending
+from kelly.db import create_run, get_run, init_db
+from kelly.engine import execute_next, install_plan
+from kelly.planning import normalize_plan
+from kelly.routing import expand_recipe, reclassify_pending
 
 SOURCE = {
     "artifact_id": "source1",

@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from birkin_lite import db, retention, usage
-from birkin_lite.contracts import (
+from kelly import db, retention, usage
+from kelly.contracts import (
     Actor,
     AppError,
     ModelBinding,

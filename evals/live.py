@@ -22,10 +22,10 @@ from typing import Literal
 
 from pydantic import Field
 
-from birkin_lite import config, db, usage, verification
-from birkin_lite.contracts import AppError, StrictModel, Usage, evidence_id
-from birkin_lite.operations import _database
-from birkin_lite.providers import TransportError, XAIClient
+from kelly import config, db, usage, verification
+from kelly.contracts import AppError, StrictModel, Usage, evidence_id
+from kelly.operations import _database
+from kelly.providers import TransportError, XAIClient
 
 from .comparison import ARMS, _environment, _run
 from .execute import ACTOR, reopened_output, rows, source_bytes, write_json

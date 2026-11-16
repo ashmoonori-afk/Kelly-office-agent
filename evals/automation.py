@@ -17,10 +17,10 @@ from time import perf_counter
 import httpx
 from pydantic import SecretStr
 
-from birkin_lite import artifacts, db, engine, safe_io, telegram
-from birkin_lite import automation as scheduler
-from birkin_lite.config import register_folder
-from birkin_lite.contracts import Actor, AppError, canonical_json
+from kelly import artifacts, db, engine, safe_io, telegram
+from kelly import automation as scheduler
+from kelly.config import register_folder
+from kelly.contracts import Actor, AppError, canonical_json
 
 from .run import Case, Observation, condition_hash, fingerprint, load_cases, sha
 

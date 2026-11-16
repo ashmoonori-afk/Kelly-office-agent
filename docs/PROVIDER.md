@@ -37,7 +37,7 @@ HTTP 오류·거절·잘못된 JSON 내용·출력 잘림·계약 불일치도 �
 설정 화면에서 모델을 준비하거나 `config.example.json`을 별도 설정 파일로 복사한다. 실제 계정의 모델 ID, `enabled:true`, 허용 프로젝트, `M` 역할, `structured_output`·`planning` 기능을 설정한 뒤 다음 명령을 실행한다. 예제의 모델 ID는 실제 가용 모델을 뜻하지 않으며 기본값은 비활성 상태다.
 
 ```powershell
-.\.venv\Scripts\python.exe -m birkin_lite.live_smoke --config .\config.json --model YOUR_ACCOUNT_MODEL_ID --allow-live
+.\.venv\Scripts\python.exe -m kelly.live_smoke --config .\config.json --model YOUR_ACCOUNT_MODEL_ID --allow-live
 ```
 
 `--allow-live`가 없으면 파일·키를 읽거나 HTTP 요청을 보내기 전에 거부한다. 명시된 실행은 계정 모델 목록 조회 1회와 합성 계획 생성 최대 1회를 수행한다. 연결 오류, 429, 5xx, 잘못된 내용에도 생성 재시도·스키마 수정 호출은 하지 않는다. 가시 출력 상한은 설정값과 1,024 중 작은 값이며 추론 토큰의 총량 상한을 의미하지 않는다. 이 검사는 실제 API 사용료가 발생할 수 있다.

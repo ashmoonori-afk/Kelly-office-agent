@@ -42,19 +42,19 @@ import getpass, io, json, os, time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from openpyxl import load_workbook
-from birkin_lite import db
-from birkin_lite.artifacts import import_source, open_artifact
-from birkin_lite.automation import AutomationConfig
-from birkin_lite.config import read_telegram_token
-from birkin_lite.contracts import Actor, PrivacyPolicy, Receipt, TaskSpec
-from birkin_lite.engine import execute_next
-from birkin_lite.planning import prepare_run
-from birkin_lite.telegram import (
+from kelly import db
+from kelly.artifacts import import_source, open_artifact
+from kelly.automation import AutomationConfig
+from kelly.config import read_telegram_token
+from kelly.contracts import Actor, PrivacyPolicy, Receipt, TaskSpec
+from kelly.engine import execute_next
+from kelly.planning import prepare_run
+from kelly.telegram import (
     TelegramClient, register_connection, create_pairing, poll_once,
     create_callback, prepare_delivery, deliver_once,
 )
-from birkin_lite.tools import registry
-from birkin_lite.usage import summarize_usage
+from kelly.tools import registry
+from kelly.usage import summarize_usage
 
 if "TELEGRAM_BOT_TOKEN" not in os.environ:
     os.environ["TELEGRAM_BOT_TOKEN"] = getpass.getpass("Telegram token (숨김): ")

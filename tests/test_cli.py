@@ -18,8 +18,8 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from birkin_lite.config import AppConfig, create_config
-from birkin_lite.engine import DaemonLock
+from kelly.config import AppConfig, create_config
+from kelly.engine import DaemonLock
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="CLI access codes use Windows DPAPI")
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,7 +43,7 @@ def _launch(path, *, access_code=False):
     startup = subprocess.STARTUPINFO()
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = subprocess.SW_HIDE
-    command = [sys.executable, "-m", "birkin_lite", "serve", "--config", str(path)]
+    command = [sys.executable, "-m", "kelly", "serve", "--config", str(path)]
     if access_code:
         command.append("--access-code")
     return subprocess.Popen(

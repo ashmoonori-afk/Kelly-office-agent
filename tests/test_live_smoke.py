@@ -6,10 +6,10 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from birkin_lite.config import AppConfig, ModelProfile, create_config, load_config, store_secret
-from birkin_lite.contracts import AppError, ModelBinding, PlanningResultV1
-from birkin_lite.db import get_value, init_db, set_value
-from birkin_lite.live_smoke import main, run_probe
+from kelly.config import AppConfig, ModelProfile, create_config, load_config, store_secret
+from kelly.contracts import AppError, ModelBinding, PlanningResultV1
+from kelly.db import get_value, init_db, set_value
+from kelly.live_smoke import main, run_probe
 
 
 def configured(tmp_path, monkeypatch, **binding_changes):
@@ -112,7 +112,7 @@ def test_explicit_flag_required_before_config_key_or_network(tmp_path, monkeypat
     def forbidden():
         pytest.fail("A denied probe cannot read a credential")
 
-    monkeypatch.setattr("birkin_lite.live_smoke.read_xai_key", forbidden)
+    monkeypatch.setattr("kelly.live_smoke.read_xai_key", forbidden)
     transport, seen = mock_service(httpx.Response(200, json=response()))
     with pytest.raises(AppError) as error:
         run_probe(tmp_path / "missing.json", "any", allow_live=allow, http_transport=transport)
@@ -276,7 +276,7 @@ def test_cli_passes_explicit_options_and_reports_exit_status(tmp_path, monkeypat
     def mocked(config_path, model_id, *, allow_live):
         return run_probe(config_path, model_id, allow_live=allow_live, http_transport=transport)
 
-    monkeypatch.setattr("birkin_lite.live_smoke.run_probe", mocked)
+    monkeypatch.setattr("kelly.live_smoke.run_probe", mocked)
     assert main(["--config", str(path), "--model", "probe-fixture-model", "--allow-live"]) == 0
     output = json.loads(capsys.readouterr().out)
     assert output["accepted"] is True and output["live"] is False

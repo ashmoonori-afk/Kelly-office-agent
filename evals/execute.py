@@ -9,9 +9,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 
-from birkin_lite import artifacts, db, engine, planning, tools, verification
-from birkin_lite.contracts import Actor, AppError, Receipt, RunRequest, TaskSpec
-from birkin_lite.contracts import PrivacyPolicy as Privacy
+from kelly import artifacts, db, engine, planning, tools, verification
+from kelly.contracts import Actor, AppError, Receipt, RunRequest, TaskSpec
+from kelly.contracts import PrivacyPolicy as Privacy
 
 from .run import Case, Observation, condition_hash, fingerprint, load_cases, read_json, sha
 

@@ -10,10 +10,10 @@ import pytest
 from test_config import evidence, profile
 from test_eval_comparison import CONTENT, case_and_plan
 
-from birkin_lite import config, db, office, parser_worker
-from birkin_lite.contracts import AppError, PrivacyPolicy
 from evals import live
 from evals.run import checks, fingerprint, read_json, sha
+from kelly import config, db, office, parser_worker
+from kelly.contracts import AppError, PrivacyPolicy
 
 
 def configured(tmp_path):
@@ -340,7 +340,7 @@ def test_model_source_numbers_reach_scoring_only_through_independent_exact_evide
         )
 
     for module in ("artifacts", "office", "verification"):
-        monkeypatch.setattr("birkin_lite." + module + ".parse_file", inline_text_worker)
+        monkeypatch.setattr("kelly." + module + ".parse_file", inline_text_worker)
     facts = [
         "기존 고객 40명이 응답했다.",
         "32명이 새 안내문이 이해하기 쉽다고 답했다.",

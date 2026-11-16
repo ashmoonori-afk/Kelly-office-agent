@@ -6,7 +6,7 @@ import pytest
 from test_metered_workflow import NOW, returned
 from test_prepare_run import OWNER, POLICY, binding, planned
 
-from birkin_lite.contracts import (
+from kelly.contracts import (
     ModelExecutor,
     PlanV1,
     RunRequest,
@@ -15,10 +15,10 @@ from birkin_lite.contracts import (
     ValidationResult,
     digest,
 )
-from birkin_lite.db import create_run, get_value, init_db, row_dict
-from birkin_lite.engine import complete_model_todo, execute_next, install_plan
-from birkin_lite.tools import registry
-from birkin_lite.verification import (
+from kelly.db import create_run, get_value, init_db, row_dict
+from kelly.engine import complete_model_todo, execute_next, install_plan
+from kelly.tools import registry
+from kelly.verification import (
     model_grounding,
     needs_semantic_review,
     semantic_review_requested,

@@ -8,7 +8,7 @@ import pytest
 from pydantic import SecretStr, ValidationError
 from test_routing import todo
 
-from birkin_lite.config import (
+from kelly.config import (
     AppConfig,
     ModelProfile,
     QualificationReport,
@@ -23,8 +23,8 @@ from birkin_lite.config import (
     store_secret,
     stored_secret,
 )
-from birkin_lite.contracts import AppError, ModelBinding, canonical_json
-from birkin_lite.routing import choose_model
+from kelly.contracts import AppError, ModelBinding, canonical_json
+from kelly.routing import choose_model
 
 
 def profile(**changes):
@@ -191,7 +191,7 @@ def test_only_explicit_xai_environment_key_is_read_and_repr_is_masked(monkeypatc
             return "XAI_SYNTHETIC_SECRET"
 
     environment = Environment()
-    monkeypatch.setattr("birkin_lite.config.os", SimpleNamespace(environ=environment))
+    monkeypatch.setattr("kelly.config.os", SimpleNamespace(environ=environment))
     key = read_xai_key()
     assert environment.reads == ["XAI_API_KEY"]
     assert key.get_secret_value() == "XAI_SYNTHETIC_SECRET"

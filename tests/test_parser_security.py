@@ -11,8 +11,8 @@ from docx import Document
 from openpyxl import Workbook
 from pypdf import PdfWriter
 
-from birkin_lite.contracts import AppError
-from birkin_lite.sandbox import MAX_RESULT_BYTES, _run_worker, _worker_environment, parse_file
+from kelly.contracts import AppError
+from kelly.sandbox import MAX_RESULT_BYTES, _run_worker, _worker_environment, parse_file
 
 
 def docx_file(path):
@@ -234,7 +234,7 @@ def test_actual_windows_memory_limit_refuses_commit():
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows suspended launch")
 def test_job_assignment_failure_never_runs_worker_code(tmp_path, monkeypatch):
-    from birkin_lite._vendor.office._winjob import WindowsJob
+    from kelly._vendor.office._winjob import WindowsJob
 
     def fail_assign(self, pid):
         raise OSError("synthetic job failure")
@@ -274,7 +274,7 @@ def test_output_cap_is_enforced_while_draining():
 def test_vendor_has_no_runtime_import_dependency():
     import ast
 
-    import birkin_lite._vendor.office as vendor
+    import kelly._vendor.office as vendor
 
     for path in Path(vendor.__file__).parent.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

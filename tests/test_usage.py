@@ -4,8 +4,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from birkin_lite import usage as usage_module
-from birkin_lite.contracts import (
+from kelly import usage as usage_module
+from kelly.contracts import (
     Actor,
     AppError,
     ModelBinding,
@@ -17,9 +17,9 @@ from birkin_lite.contracts import (
     Usage,
     canonical_json,
 )
-from birkin_lite.db import create_run, get_run, get_value, init_db
-from birkin_lite.engine import install_plan
-from birkin_lite.usage import (
+from kelly.db import create_run, get_run, get_value, init_db
+from kelly.engine import install_plan
+from kelly.usage import (
     begin_call,
     mark_usage_unknown,
     release_call,

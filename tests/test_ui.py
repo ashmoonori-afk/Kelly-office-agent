@@ -12,8 +12,8 @@ import uvicorn
 from openpyxl import load_workbook
 from playwright.sync_api import expect, sync_playwright
 
-from birkin_lite.api import create_app
-from birkin_lite.config import AppConfig, create_config
+from kelly.api import create_app
+from kelly.config import AppConfig, create_config
 
 
 @contextmanager

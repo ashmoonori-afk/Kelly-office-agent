@@ -7,11 +7,11 @@ from openpyxl import Workbook, load_workbook
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
-from birkin_lite import office
-from birkin_lite.artifacts import import_source, open_artifact
-from birkin_lite.contracts import Actor, AppError, RunRequest
-from birkin_lite.db import create_run, init_db
-from birkin_lite.sandbox import parse_file
+from kelly import office
+from kelly.artifacts import import_source, open_artifact
+from kelly.contracts import Actor, AppError, RunRequest
+from kelly.db import create_run, init_db
+from kelly.sandbox import parse_file
 
 OWNER = Actor(id="owner", project_ids=["sales"])
 

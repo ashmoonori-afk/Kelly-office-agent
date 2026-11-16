@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from birkin_lite.artifacts import import_source
-from birkin_lite.context import (
+from kelly.artifacts import import_source
+from kelly.context import (
     build_model_request,
     build_plan_request,
     cache_get,
@@ -14,7 +14,7 @@ from birkin_lite.context import (
     extraction_cache_key,
     response_cache_key,
 )
-from birkin_lite.contracts import (
+from kelly.contracts import (
     Actor,
     AppError,
     ModelBinding,
@@ -24,9 +24,9 @@ from birkin_lite.contracts import (
     TodoV1,
     canonical_json,
 )
-from birkin_lite.db import create_run, init_db
-from birkin_lite.tools import catalog, registry
-from birkin_lite.tools import inspect as inspect_source
+from kelly.db import create_run, init_db
+from kelly.tools import catalog, registry
+from kelly.tools import inspect as inspect_source
 
 
 def binding():
@@ -223,7 +223,7 @@ def test_model_window_and_sensitive_payload_and_numeric_evidence():
 
 
 def test_serialized_byte_hardcap_is_independent_of_token_estimate(monkeypatch):
-    monkeypatch.setattr("birkin_lite.context.CONTEXT_TARGET", 200000)
+    monkeypatch.setattr("kelly.context.CONTEXT_TARGET", 200000)
     large_window = binding().model_copy(update={"context_window": 200000})
     with pytest.raises(AppError) as error:
         build_model_request(

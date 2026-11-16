@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from birkin_lite import safe_io
-from birkin_lite._vendor.office.errors import DocumentError, DocumentErrorCode
-from birkin_lite.contracts import AppError
+from kelly import safe_io
+from kelly._vendor.office.errors import DocumentError, DocumentErrorCode
+from kelly.contracts import AppError
 
 
 @pytest.mark.parametrize("tail", ["../outside", "file:stream", "trailing.", "trailing ", "NUL"])

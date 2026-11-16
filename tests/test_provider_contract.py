@@ -3,9 +3,9 @@ import asyncio
 import httpx
 import pytest
 
-from birkin_lite import usage
-from birkin_lite.context import build_model_request
-from birkin_lite.contracts import (
+from kelly import usage
+from kelly.context import build_model_request
+from kelly.contracts import (
     Actor,
     AppError,
     ModelBinding,
@@ -16,9 +16,9 @@ from birkin_lite.contracts import (
     TodoV1,
     Usage,
 )
-from birkin_lite.db import create_run, init_db
-from birkin_lite.engine import install_plan
-from birkin_lite.providers import TransportError, metered_complete
+from kelly.db import create_run, init_db
+from kelly.engine import install_plan
+from kelly.providers import TransportError, metered_complete
 
 
 class SequenceTransport:

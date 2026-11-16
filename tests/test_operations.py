@@ -10,10 +10,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from birkin_lite import artifacts, config, db, engine, operations, planning, telegram, tools
-from birkin_lite.__main__ import main
-from birkin_lite.automation import AutomationConfig
-from birkin_lite.contracts import AppError, PrivacyPolicy, RunRequest
+from kelly import artifacts, config, db, engine, operations, planning, telegram, tools
+from kelly.__main__ import main
+from kelly.automation import AutomationConfig
+from kelly.contracts import AppError, PrivacyPolicy, RunRequest
 
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
 

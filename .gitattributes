@@ -9,4 +9,4 @@
 *.yml text eol=lf
 *.png binary
 # Preserve the upstream notices verbatim, including their whitespace.
-src/birkin_lite/licenses/third-party.txt -whitespace
+src/kelly/licenses/third-party.txt -whitespace

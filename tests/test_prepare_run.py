@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from birkin_lite.artifacts import import_source
-from birkin_lite.contracts import (
+from kelly.artifacts import import_source
+from kelly.contracts import (
     Actor,
     AppError,
     ModelBinding,
@@ -14,10 +14,10 @@ from birkin_lite.contracts import (
     RunRequest,
     TaskSpec,
 )
-from birkin_lite.db import create_run, get_run, get_value, init_db, supply_inputs
-from birkin_lite.engine import execute_next, request_cancel
-from birkin_lite.planning import prepare_run
-from birkin_lite.tools import registry
+from kelly.db import create_run, get_run, get_value, init_db, supply_inputs
+from kelly.engine import execute_next, request_cancel
+from kelly.planning import prepare_run
+from kelly.tools import registry
 
 OWNER = Actor(id="owner", project_ids=["sales"])
 POLICY = PrivacyPolicy(project_id="sales", allow_cloud=True, allowed_providers=["test"])

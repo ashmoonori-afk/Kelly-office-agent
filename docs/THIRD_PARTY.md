@@ -1,11 +1,11 @@
 # Third-party source and security boundary
 
-Birkin Lite vendors a small subset of Birkin under `src/birkin_lite/_vendor/office/`.
+Birkin Lite vendors a small subset of Birkin under `src/kelly/_vendor/office/`.
 Upstream repository: https://github.com/ashmoonori-afk/birkin . Inspected checkout HEAD:
 `16fe5dad52920837366ceff6e440c41e871031ce`. The byte hashes below identify the actual copied local sources,
 including any local state; HEAD alone is not a claim that all files exactly matched that commit.
 Original license: MIT, Copyright (c) 2026 ashmoonori. The complete license is preserved at
-`src/birkin_lite/_vendor/office/LICENSE` and included in the installed package.
+`src/kelly/_vendor/office/LICENSE` and included in the installed package.
 
 ## Retained code and changes
 
