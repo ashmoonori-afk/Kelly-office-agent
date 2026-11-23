@@ -1,3 +1,8 @@
+> [!IMPORTANT]
+> **Kelly is being rebuilt from scratch.** Beta testing is expected in December 2026. Apply to be a beta tester: https://forms.gle/PUt9tuCtrU1YcTnf8
+>
+> Kelly는 지금 처음부터 새로 만들고 있습니다. 베타 테스트는 2026년 12월 예정이며, 테스트 사용 신청은 여기서 받습니다: https://forms.gle/PUt9tuCtrU1YcTnf8
+
 # Kelly Office Agent
 
 English · [한국어](README.ko.md)
